@@ -1,0 +1,190 @@
+// API Functions
+async function apiCall(url, options = {}) {
+    const cacheBuster = options.method === 'GET' ? getCacheBuster() : '';
+    const fullUrl = `${CONFIG.API_BASE}${url}${cacheBuster}`;
+    
+    return fetch(fullUrl, {
+        ...options,
+        headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+            ...options.headers
+        }
+    });
+}
+
+async function loadStatus() {
+    try {
+        const response = await apiCall(`/status?user=${CONFIG.USER}`);
+        const data = await response.json();
+        appState.status = data;
+        render();
+    } catch (error) {
+        console.error('Failed to load status:', error);
+    }
+}
+
+async function loadTodayData() {
+    try {
+        const today = new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD format
+        const response = await apiCall(`/day/${today}?user=${CONFIG.USER}`);
+        const data = await response.json();
+        appState.dayData = data;
+        render();
+    } catch (error) {
+        console.error('Failed to load day data:', error);
+    }
+}
+
+async function loadWeekData() {
+    try {
+        const now = new Date();
+        const year = now.getFullYear();
+        const week = getWeekNumber(now);
+        const response = await apiCall(`/week/${year}/${week}?user=${CONFIG.USER}`);
+        const data = await response.json();
+        appState.weekData = data;
+        render();
+    } catch (error) {
+        console.error('Failed to load week data:', error);
+    }
+}
+
+async function loadSessions() {
+    try {
+        const response = await apiCall(`/sessions?user=${CONFIG.USER}&limit=100`);
+        const data = await response.json();
+        appState.sessions = data;
+        render();
+    } catch (error) {
+        console.error('Failed to load sessions:', error);
+    }
+}
+
+async function loadTimeInfo() {
+    try {
+        const response = await apiCall(`/timeinfo?user=${CONFIG.USER}`);
+        const data = await response.json();
+        appState.timeInfo = data;
+        render();
+    } catch (error) {
+        console.error('Failed to load time info:', error);
+    }
+}
+
+async function handleStamp() {
+    if (!appState.isOnline) {
+        showNotification('Keine Internetverbindung! Bitte versuche es später erneut.', 'error');
+        return;
+    }
+    
+    appState.isLoading = true;
+    render();
+    
+    try {
+        const response = await apiCall('/stamp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user: CONFIG.USER })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Stamp failed');
+        }
+        
+        const data = await response.json();
+        
+        // Refresh all data
+        await Promise.all([
+            loadStatus(),
+            loadTodayData(),
+            loadWeekData()
+        ]);
+        
+        const action = data.status === 'in' ? 'Eingestempelt' : 'Ausgestempelt';
+        const time = new Date(data.timestamp).toLocaleTimeString('de-DE', {
+            hour: '2-digit',
+            minute: '2-digit',
+            timeZone: 'Europe/Berlin'
+        });
+        
+        showNotification(`${action} um ${time}`, 'success');
+        
+        if ('vibrate' in navigator) {
+            const vibration = data.status === 'in' ? CONFIG.VIBRATION.STAMP_IN : CONFIG.VIBRATION.STAMP_OUT;
+            navigator.vibrate(vibration);
+        }
+        
+        // Start/stop live updates
+        setupLiveUpdates();
+        
+    } catch (error) {
+        showNotification(`Fehler: ${error.message}`, 'error');
+    } finally {
+        appState.isLoading = false;
+        render();
+    }
+}
+
+async function deleteSession(sessionId) {
+    if (!confirm('Möchten Sie diese Buchung wirklich löschen?')) {
+        return;
+    }
+
+    try {
+        const response = await apiCall(`/sessions/${sessionId}?user=${CONFIG.USER}`, {
+            method: 'DELETE'
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to delete session');
+        }
+
+        showNotification('Buchung erfolgreich gelöscht', 'success');
+        await loadSessions();
+        await loadTodayData();
+        await loadWeekData();
+
+    } catch (error) {
+        showNotification(`Fehler beim Löschen: ${error.message}`, 'error');
+    }
+}
+
+async function createManualSession(date, startTime, endTime) {
+    try {
+        const response = await apiCall('/sessions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                user: CONFIG.USER,
+                date: date,
+                start_time: startTime,
+                end_time: endTime
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to create session');
+        }
+
+        showNotification('Buchung erfolgreich erstellt', 'success');
+        
+        // Clear form
+        document.getElementById('manual-date').value = '';
+        document.getElementById('manual-start').value = '';
+        document.getElementById('manual-end').value = '';
+        
+        // Refresh data
+        await Promise.all([
+            loadTodayData(),
+            loadWeekData(),
+            loadSessions()
+        ]);
+
+    } catch (error) {
+        showNotification(`Fehler: ${error.message}`, 'error');
+    }
+}
