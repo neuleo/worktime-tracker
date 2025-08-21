@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Arbeitszeit Tracker</title>
+    
+    <!-- PWA Meta Tags -->
+    <meta name="description" content="Einfache Arbeitszeiterfassung mit NFC Support">
+    <meta name="theme-color" content="#3b82f6">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Arbeitszeit">
+    
+    <!-- Manifest -->
+    <link rel="manifest" href="/manifest.json">
+    
+    <!-- Icons -->
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
+    <link rel="apple-touch-icon" href="/icon-192.png">
+    <meta name="msapplication-TileImage" content="/icon-512.png">
+    <meta name="msapplication-TileColor" content="#3b82f6">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+        /* Custom styles for better mobile experience */
+        body {
+            overscroll-behavior: none;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            -khtml-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+        
+        /* Prevent zoom on input focus */
+        input, textarea, select {
+            font-size: 16px;
+        }
+        
+        /* Custom button press effect */
+        .btn-press {
+            transform: scale(0.98);
+            transition: transform 0.1s;
+        }
+        
+        /* Loading animation */
+        .loading-spinner {
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        /* PWA specific styles */
+        @media all and (display-mode: standalone) {
+            body {
+                padding-top: env(safe-area-inset-top);
+                padding-bottom: env(safe-area-inset-bottom);
+            }
+        }
+        
+        /* Status bar spacing for iOS */
+        .status-bar-safe {
+            padding-top: max(1rem, env(safe-area-inset-top));
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <!-- React and ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    
+    <!-- App Script -->
+    <script>
+        // React App Component
+        const { useState, useEffect } = React;
+        const { Clock, Play, Square, Calendar, TrendingUp, Smartphone, Wifi, WifiOff } = lucide;
+
+        const API_BASE = window.location.hostname === 'localhost' 
+            ? 'http://localhost:8000' 
+            : 'http://192.168.1.21:8000'; // Änder die IP zu deiner lokalen IP
+
+        const App = () => {
+            // State
+            const [status, setStatus] = useState({ status: 'out' });
+            const [dayData, setDayData] = useState(null);
+            const [weekData, setWeekData] = useState(null);
+            const [isLoading, setIsLoading] = useState(false);
+            const [currentTime, setCurrentTime] = useState(new Date());
+            const [isOnline, setIsOnline] = useState(navigator.onLine);
+            const [activeTab, setActiveTab] = useState('today');
+
+            // Update current time every second
+            useEffect(() => {
+                const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+                return () => clearInterval(timer);
+            }, []);
+
+            // Check online status
+            useEffect(() => {
+                const handleOnline = () => setIsOnline(true);
+                const handleOffline = () => setIsOnline(false);
+                
+                window.addEventListener('online', handleOnline);
+                window.addEventListener('offline', handleOffline);
+                
+                return () => {
+                    window.removeEventListener('online', handleOnline);
+                    window.removeEventListener('offline', handleOffline);
+                };
+            }, []);
+
+            // Load initial data
+            useEffect(() => {
+                loadStatus();
+                loadTodayData();
+                loadWeekData();
+            }, []);
+
+            // API calls
+            const loadStatus = async () => {
+                try {
+                    const response = await fetch(`${API_BASE}/status?user=leon`);
+                    const data = await response.json();
+                    setStatus(data);
+                } catch (error) {
+                    console.error('Failed to load status:', error);
+                }
+            };
+
+            const loadTodayData = async () => {
+                try {
+                    const today = new Date().toISOString().split('T')[0];
+                    const response = await fetch(`${API_BASE}/day/${today}?user=leon`);
+                    const data = await response.json();
+                    setDayData(data);
+                } catch (error) {
+                    console.error('Failed to load day data:', error);
+                }
+            };
+
+            const loadWeekData = async () => {
+                try {
+                    const now = new Date();
+                    const year = now.getFullYear();
+                    const week = getWeekNumber(now);
+                    const response = await fetch(`${API_BASE}/week/${year}/${week}?user=leon`);
+                    const data = await response.json();
+                    setWeekData(data);
+                } catch (error) {
+                    console.error('Failed to load week data:', error);
+                }
+            };
+
+            const handleStamp = async () => {
+                if (!isOnline) {
+                    showNotification('Keine Internetverbindung! Bitte versuche es später erneut.', 'error');
+                    return;
+                }
+
+                setIsLoading(true);
+                try {
+                    const response = await fetch(`${API_BASE}/stamp`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user: 'leon' })
+                    });
+                    
+                    if (!response.ok) {
+                        const error = await response.json();
+                        throw new Error(error.detail || 'Stamp failed');
+                    }
+                    
+                    const data = await response.json();
+                    
+                    // Refresh all data
+                    await Promise.all([
+                        loadStatus(),
+                        loadTodayData(),
+                        loadWeekData()
+                    ]);
+                    
+                    // Show success feedback
+                    const action = data.status === 'in' ? 'Eingestempelt' : 'Ausgestempelt';
+                    const time = new Date(data.timestamp).toLocaleTimeString('de-DE', {
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                    
+                    showNotification(`${action} um ${time}`, 'success');
+                    
+                    // Vibration feedback on mobile
+                    if ('vibrate' in navigator) {
+                        navigator.vibrate(data.status === 'in' ? [100] : [100, 50, 100]);
+                    }
+                    
+                } catch (error) {
+                    showNotification(`Fehler: ${error.message}`, 'error');
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            // Helper functions
+            const getWeekNumber = (date) => {
+                const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+                const dayNum = d.getUTCDay() || 7;
+                d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+                const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+                return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+            };
+
+            const formatDuration = (timeString) => {
+                if (timeString.startsWith('-')) {
+                    return `−${timeString.substring(1)}`;
+                }
+                return timeString;
+            };
+
+            const getOvertimeColor = (overtime) => {
+                if (overtime.startsWith('-')) return 'text-red-500';
+                if (overtime === '00:00') return 'text-gray-600';
+                return 'text-green-500';
+            };
+
+            const showNotification = (message, type = 'info') => {
+                const notification = document.createElement('div');
+                const bgColor = type === 'error' ? 'bg-red-500' : type === 'success' ? 'bg-green-500' : 'bg-blue-500';
+                notification.className = `fixed top-4 right-4 ${bgColor} text-white px-4 py-2 rounded-lg shadow-lg z-50 transform translate-x-full transition-transform duration-300`;
+                notification.textContent = message;
+                document.body.appendChild(notification);
+                
+                // Animate in
+                setTimeout(() => {
+                    notification.classList.remove('translate-x-full');
+                }, 100);
+                
+                // Animate out and remove
+                setTimeout(() => {
+                    notification.classList.add('translate-x-full');
+                    setTimeout(() => notification.remove(), 300);
+                }, 3000);
+            };
+
+            return React.createElement('div', { 
+                className: 'min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 status-bar-safe' 
+            }, [
+                // Header
+                React.createElement('div', { 
+                    key: 'header',
+                    className: 'bg-white shadow-sm border-b' 
+                }, [
+                    React.createElement('div', { 
+                        key: 'header-content',
+                        className: 'max-w-md mx-auto px-4 py-4' 
+                    }, [
+                        React.createElement('div', { 
+                            key: 'header-flex',
+                            className: 'flex items-center justify-between' 
+                        }, [
+                            React.createElement('div', { 
+                                key: 'title',
+                                className: 'flex items-center space-x-2' 
+                            }, [
+                                React.createElement(Clock, { 
+                                    key: 'clock-icon',
+                                    className: 'h-6 w-6 text-blue-600' 
+                                }),
+                                React.createElement('h1', { 
+                                    key: 'title-text',
+                                    className: 'text-xl font-bold text-gray-900' 
+                                }, 'Arbeitszeit')
+                            ]),
+                            React.createElement('div', { 
+                                key: 'status-bar',
+                                className: 'flex items-center space-x-2' 
+                            }, [
+                                React.createElement(isOnline ? Wifi : WifiOff, { 
+                                    key: 'wifi-icon',
+                                    className: `h-4 w-4 ${isOnline ? 'text-green-500' : 'text-red-500'}` 
+                                }),
+                                React.createElement('span', { 
+                                    key: 'time',
+                                    className: 'text-sm font-mono text-gray-600' 
+                                }, currentTime.toLocaleTimeString('de-DE', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    second: '2-digit'
+                                }))
+                            ])
+                        ])
+                    ])
+                ]),
+
+                React.createElement('div', { 
+                    key: 'main',
+                    className: 'max-w-md mx-auto px-4 py-6 space-y-6' 
+                }, [
+                    // Status Card
+                    React.createElement('div', { 
+                        key: 'status-card',
+                        className: 'bg-white rounded-xl shadow-sm border p-6' 
+                    }, [
+                        React.createElement('div', { 
+                            key: 'status-content',
+                            className: 'text-center space-y-4' 
+                        }, [
+                            React.createElement('div', { 
+                                key: 'status-badge',
+                                className: `inline-flex items-center px-4 py-2 rounded-full ${
+                                    status.status === 'in' 
+                                        ? 'bg-green-100 text-green-800' 
+                                        : 'bg-gray-100 text-gray-800'
+                                }` 
+                            }, [
+                                React.createElement(status.status === 'in' ? Play : Square, { 
+                                    key: 'status-icon',
+                                    className: 'h-4 w-4 mr-2' 
+                                }),
+                                status.status === 'in' ? 'Eingestempelt' : 'Ausgestempelt'
+                            ]),
+
+                            status.status === 'in' && status.since && status.duration && 
+                            React.createElement('div', { 
+                                key: 'time-info',
+                                className: 'text-sm text-gray-600' 
+                            }, [
+                                React.createElement('div', { key: 'since' }, 
+                                    `Seit: ${new Date(status.since).toLocaleTimeString('de-DE', {
+                                        hour: '2-digit',
+                                        minute: '2-digit'
+                                    })}`
+                                ),
+                                React.createElement('div', { 
+                                    key: 'duration',
+                                    className: 'font-mono text-lg mt-1' 
+                                }, status.duration)
+                            ]),
+
+                            React.createElement('button', {
+                                key: 'stamp-button',
+                                onClick: handleStamp,
+                                disabled: isLoading || !isOnline,
+                                className: `w-full py-4 px-6 rounded-xl font-semibold text-lg transition-all ${
+                                    status.status === 'in'
+                                        ? 'bg-red-500 hover:bg-red-600 text-white shadow-lg hover:shadow-xl'
+                                        : 'bg-blue-500 hover:bg-blue-600 text-white shadow-lg hover:shadow-xl'
+                                } ${isLoading ? 'opacity-50 cursor-not-allowed' : ''} ${
+                                    !isOnline ? 'opacity-50 cursor-not-allowed' : ''
+                                }`
+                            }, isLoading ? '...' : status.status === 'in' ? 'Ausstempeln' : 'Einstempeln'),
+
+                            !isOnline && React.createElement('p', { 
+                                key: 'offline-warning',
+                                className: 'text-sm text-red-500' 
+                            }, 'Offline - Keine Verbindung')
+                        ])
+                    ]),
+
+                    // Tabs
+                    React.createElement('div', { 
+                        key: 'tabs-card',
+                        className: 'bg-white rounded-xl shadow-sm border overflow-hidden' 
+                    }, [
+                        React.createElement('div', { 
+                            key: 'tab-buttons',
+                            className: 'flex' 
+                        }, [
+                            React.createElement('button', {
+                                key: 'today-tab',
+                                onClick: () => setActiveTab('today'),
+                                className: `flex-1 py-3 px-4 text-sm font-medium transition-colors ${
+                                    activeTab === 'today'
+                                        ? 'bg-blue-50 text-blue-600 border-b-2 border-blue-600'
+                                        : 'text-gray-500 hover:text-gray-700'
+                                }`
+                            }, [
+                                React.createElement(Calendar, { 
+                                    key: 'cal-icon',
+                                    className: 'h-4 w-4 inline mr-2' 
+                                }),
+                                'Heute'
+                            ]),
+                            React.createElement('button', {
+                                key: 'week-tab',
+                                onClick: () => setActiveTab('week'),
+                                className: `flex-1 py-3 px-4 text-sm font-medium transition-colors ${
+                                    activeTab === 'week'
+                                        ? 'bg-blue-50 text-blue-600 border-b-2 border-blue-600'
+                                        : 'text-gray-500 hover:text-gray-700'
+                                }`
+                            }, [
+                                React.createElement(TrendingUp, { 
+                                    key: 'trend-icon',
+                                    className: 'h-4 w-4 inline mr-2' 
+                                }),
+                                'Woche'
+                            ])
+                        ]),
+
+                        // Today Tab Content
+                        activeTab === 'today' && dayData && React.createElement('div', { 
+                            key: 'today-content',
+                            className: 'p-6 space-y-4' 
+                        }, [
+                            React.createElement('div', { 
+                                key: 'time-grid',
+                                className: 'grid grid-cols-2 gap-4' 
+                            }, [
+                                React.createElement('div', { 
+                                    key: 'start-time',
+                                    className: 'text-center' 
+                                }, [
+                                    React.createElement('div', { 
+                                        key: 'start-value',
+                                        className: 'text-2xl font-bold text-gray-900 font-mono' 
+                                    }, dayData.start || '--:--'),
+                                    React.createElement('div', { 
+                                        key: 'start-label',
+                                        className: 'text-sm text-gray-500' 
+                                    }, 'Start')
+                                ]),
+                                React.createElement('div', { 
+                                    key: 'end-time',
+                                    className: 'text-center' 
+                                }, [
+                                    React.createElement('div', { 
+                                        key: 'end-value',
+                                        className: 'text-2xl font-bold text-gray-900 font-mono' 
+                                    }, dayData.end || '--:--'),
+                                    React.createElement('div', { 
+                                        key: 'end-label',
+                                        className: 'text-sm text-gray-500' 
+                                    }, 'Ende')
+                                ])
+                            ]),
+
+                            React.createElement('div', { 
+                                key: 'stats',
+                                className: 'border-t pt-4 space-y-3' 
+                            }, [
+                                React.createElement('div', { 
+                                    key: 'pause-row',
+                                    className: 'flex justify-between items-center' 
+                                }, [
+                                    React.createElement('span', { 
+                                        key: 'pause-label',
+                                        className: 'text-gray-600' 
+                                    }, 'Pause:'),
+                                    React.createElement('span', { 
+                                        key: 'pause-value',
+                                        className: 'font-mono text-orange-600' 
+                                    }, dayData.pause)
+                                ]),
+                                React.createElement('div', { 
+                                    key: 'worked-row',
+                                    className: 'flex justify-between items-center' 
+                                }, [
+                                    React.createElement('span', { 
+                                        key: 'worked-label',
+                                        className: 'text-gray-600' 
+                                    }, 'Gearbeitet:'),
+                                    React.createElement('span', { 
+                                        key: 'worked-value',
+                                        className: 'font-mono text-blue-600' 
+                                    }, dayData.worked)
+                                ]),
+                                React.createElement('div', { 
+                                    key: 'target-row',
+                                    className: 'flex justify-between items-center' 
+                                }, [
+                                    React.createElement('span', { 
+                                        key: 'target-label',
+                                        className: 'text-gray-600' 
+                                    }, 'Soll:'),
+                                    React.createElement('span', { 
+                                        key: 'target-value',
+                                        className: 'font-mono text-gray-600' 
+                                    }, dayData.target)
+                                ]),
+                                React.createElement('div', { 
+                                    key: 'overtime-row',
+                                    className: 'flex justify-between items-center pt-2 border-t' 
+                                }, [
+                                    React.createElement('span', { 
+                                        key: 'overtime-label',
+                                        className: 'font-medium text-gray-700' 
+                                    }, 'Überstunden:'),
+                                    React.createElement('span', { 
+                                        key: 'overtime-value',
+                                        className: `font-mono font-bold ${getOvertimeColor(dayData.overtime)}` 
+                                    }, formatDuration(dayData.overtime))
+                                ])
+                            ])
+                        ]),
+
+                        // Week Tab Content
+                        activeTab === 'week' && weekData && React.createElement('div', { 
+                            key: 'week-content',
+                            className: 'p-6 space-y-4' 
+                        }, [
+                            React.createElement('div', { 
+                                key: 'week-title',
+                                className: 'text-center mb-4' 
+                            }, [
+                                React.createElement('div', { 
+                                    key: 'week-name',
+                                    className: 'text-lg font-semibold text-gray-900' 
+                                }, weekData.week)
+                            ]),
+
+                            React.createElement('div', { 
+                                key: 'week-stats',
+                                className: 'space-y-3' 
+                            }, [
+                                React.createElement('div', { 
+                                    key: 'week-worked-row',
+                                    className: 'flex justify-between items-center' 
+                                }, [
+                                    React.createElement('span', { 
+                                        key: 'week-worked-label',
+                                        className: 'text-gray-600' 
+                                    }, 'Gearbeitet:'),
+                                    React.createElement('span', { 
+                                        key: 'week-worked-value',
+                                        className: 'font-mono text-blue-600' 
+                                    }, weekData.worked_total)
+                                ]),
+                                React.createElement('div', { 
+                                    key: 'week-target-row',
+                                    className: 'flex justify-between items-center' 
+                                }, [
+                                    React.createElement('span', { 
+                                        key: 'week-target-label',
+                                        className: 'text-gray-600' 
+                                    }, 'Soll:'),
+                                    React.createElement('span', { 
+                                        key: 'week-target-value',
+                                        className: 'font-mono text-gray-600' 
+                                    }, weekData.target_total)
+                                ]),
+                                React.createElement('div', { 
+                                    key: 'week-overtime-row',
+                                    className: 'flex justify-between items-center pt-2 border-t' 
+                                }, [
+                                    React.createElement('span', { 
+                                        key: 'week-overtime-label',
+                                        className: 'font-medium text-gray-700' 
+                                    }, 'Überstunden:'),
+                                    React.createElement('span', { 
+                                        key: 'week-overtime-value',
+                                        className: `font-mono font-bold ${getOvertimeColor(weekData.overtime_total)}` 
+                                    }, formatDuration(weekData.overtime_total))
+                                ])
+                            ])
+                        ])
+                    ]),
+
+                    // PWA Install Hint
+                    React.createElement('div', { 
+                        key: 'pwa-hint',
+                        className: 'bg-blue-50 border border-blue-200 rounded-xl p-4' 
+                    }, [
+                        React.createElement('div', { 
+                            key: 'pwa-content',
+                            className: 'flex items-start space-x-3' 
+                        }, [
+                            React.createElement(Smartphone, { 
+                                key: 'phone-icon',
+                                className: 'h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0' 
+                            }),
+                            React.createElement('div', { 
+                                key: 'pwa-text',
+                                className: 'text-sm' 
+                            }, [
+                                React.createElement('div', { 
+                                    key: 'pwa-title',
+                                    className: 'font-medium text-blue-900 mb-1' 
+                                }, 'App installieren'),
+                                React.createElement('div', { 
+                                    key: 'pwa-desc',
+                                    className: 'text-blue-700' 
+                                }, 'Über das Browser-Menü → "Zum Startbildschirm hinzufügen" für schnellen Zugriff')
+                            ])
+                        ])
+                    ])
+                ])
+            ]);
+        };
+
+        // Register Service Worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .then(registration => {
+                        console.log('SW registered: ', registration);
+                    })
+                    .catch(registrationError => {
+                        console.log('SW registration failed: ', registrationError);
+                    });
+            });
+        }
+
+        // Render App
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(React.createElement(App));
+    </script>
+</body>
+</html>
