@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, desc
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, desc, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 from datetime import datetime, timedelta, time
@@ -10,6 +10,7 @@ import os
 from typing import Optional, List
 import pytz
 from zoneinfo import ZoneInfo
+from collections import defaultdict
 
 # Timezone setup for Berlin
 BERLIN_TZ = ZoneInfo("Europe/Berlin")
@@ -39,6 +40,7 @@ class User(Base):
     name = Column(String, unique=True, index=True)
     
     work_sessions = relationship("WorkSession", back_populates="user")
+    overtime_adjustments = relationship("OvertimeAdjustment", back_populates="user")
 
 class WorkSession(Base):
     __tablename__ = "work_sessions"
@@ -49,6 +51,15 @@ class WorkSession(Base):
     action = Column(String)  # "in" or "out"
     
     user = relationship("User", back_populates="work_sessions")
+
+class OvertimeAdjustment(Base):
+    __tablename__ = "overtime_adjustments"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    timestamp = Column(DateTime, default=get_berlin_now)
+    adjustment_seconds = Column(Integer)
+    
+    user = relationship("User", back_populates="overtime_adjustments")
 
 # Create tables
 os.makedirs("data", exist_ok=True)
@@ -106,8 +117,17 @@ class TimeInfoResponse(BaseModel):
     time_to_10h: Optional[str] = None
     estimated_end_time: Optional[str] = None
 
+class OvertimeAdjustmentRequest(BaseModel):
+    user: str
+    hours: float
+
+class OvertimeResponse(BaseModel):
+    total_overtime_str: str
+    total_overtime_seconds: int
+    free_days: float
+
 # FastAPI app
-app = FastAPI(title="Arbeitszeit Tracking API", version="1.0.0")
+app = FastAPI(title="Arbeitszeit Tracking API", version="1.1.0")
 
 # CORS middleware
 app.add_middleware(
@@ -176,11 +196,12 @@ def calculate_daily_stats(bookings: List[WorkSession]) -> tuple[int, int, int]:
             total_presence_seconds += presence_duration
             current_in_time = None
     
-    # If still clocked in, add current duration
+    # If still clocked in, add current duration only if it's for the same day
     if current_in_time:
-        current_time = get_berlin_now()
-        presence_duration = int((current_time - current_in_time).total_seconds())
-        total_presence_seconds += presence_duration
+        now = get_berlin_now()
+        if now.date() == current_in_time.date():
+            presence_duration = int((now - current_in_time).total_seconds())
+            total_presence_seconds += presence_duration
     
     # Apply pause rules based on total presence time
     if total_presence_seconds <= 6 * 3600:  # <= 6h
@@ -219,6 +240,28 @@ def get_day_bookings(db: Session, user_id: int, date: datetime) -> List[WorkSess
         WorkSession.timestamp >= day_start,
         WorkSession.timestamp < day_end
     ).order_by(WorkSession.timestamp).all()
+
+def get_total_overtime_seconds(db: Session, user_id: int) -> int:
+    """Calculate total overtime from all sessions and adjustments."""
+    # 1. Calculate overtime from work sessions
+    all_sessions = db.query(WorkSession).filter(WorkSession.user_id == user_id).all()
+    
+    sessions_by_day = defaultdict(list)
+    for session in all_sessions:
+        day = ensure_berlin_tz(session.timestamp).date()
+        sessions_by_day[day].append(session)
+        
+    total_session_overtime = 0
+    for day, day_sessions in sessions_by_day.items():
+        _, _, overtime_seconds = calculate_daily_stats(day_sessions)
+        total_session_overtime += overtime_seconds
+
+    # 2. Get sum of all adjustments
+    total_adjustment = db.query(func.sum(OvertimeAdjustment.adjustment_seconds)).filter(
+        OvertimeAdjustment.user_id == user_id
+    ).scalar() or 0
+    
+    return total_session_overtime + total_adjustment
 
 def validate_booking_sequence(bookings: List[WorkSession], new_action: str) -> bool:
     """
@@ -685,6 +728,50 @@ async def get_time_info(user: str = "leon", db: Session = Depends(get_db)):
     
     except Exception as e:
         print(f"Error in get_time_info: {e}")
+        raise HTTPException(status_code=500, detail="Interner Serverfehler")
+
+@app.get("/overtime", response_model=OvertimeResponse)
+async def get_overtime_summary(user: str = "leon", db: Session = Depends(get_db)):
+    """Get total overtime summary."""
+    try:
+        user_obj = get_or_create_user(db, user)
+        total_seconds = get_total_overtime_seconds(db, user_obj.id)
+        
+        TARGET_DAY_SECONDS = 7 * 3600 + 48 * 60
+        free_days = total_seconds / TARGET_DAY_SECONDS if TARGET_DAY_SECONDS > 0 else 0
+        
+        return OvertimeResponse(
+            total_overtime_str=seconds_to_time_str(total_seconds),
+            total_overtime_seconds=total_seconds,
+            free_days=round(free_days, 2)
+        )
+    except Exception as e:
+        print(f"Error in get_overtime_summary: {e}")
+        raise HTTPException(status_code=500, detail="Interner Serverfehler")
+
+@app.post("/overtime")
+async def adjust_overtime(request: OvertimeAdjustmentRequest, db: Session = Depends(get_db)):
+    """Create an overtime adjustment to set the total to a new value."""
+    try:
+        user_obj = get_or_create_user(db, request.user)
+        
+        target_total_seconds = int(request.hours * 3600)
+        current_total_seconds = get_total_overtime_seconds(db, user_obj.id)
+        
+        adjustment_to_apply = target_total_seconds - current_total_seconds
+        
+        new_adjustment = OvertimeAdjustment(
+            user_id=user_obj.id,
+            adjustment_seconds=adjustment_to_apply
+        )
+        
+        db.add(new_adjustment)
+        db.commit()
+        
+        return {"message": "Overtime adjusted successfully", "adjustment_applied_hours": round(request.hours - (current_total_seconds / 3600), 2)}
+        
+    except Exception as e:
+        print(f"Error in adjust_overtime: {e}")
         raise HTTPException(status_code=500, detail="Interner Serverfehler")
 
 @app.get("/")

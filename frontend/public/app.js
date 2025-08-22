@@ -22,6 +22,8 @@ function navigateTo(page) {
         loadSessions();
     } else if (page === 'timeinfo') {
         loadTimeInfo();
+    } else if (page === 'flextime') {
+        loadOvertimeData();
     }
     
     render();
@@ -44,6 +46,23 @@ function handleManualSubmit(event) {
     }
 
     createManualBooking(date, action, time);
+}
+
+function handleOvertimeSubmit(event) {
+    event.preventDefault();
+    const hoursInput = document.getElementById('overtime-hours');
+    if (!hoursInput || !hoursInput.value) {
+        showNotification('Bitte einen Wert eingeben', 'error');
+        return;
+    }
+    
+    const hours = parseFloat(hoursInput.value.replace(',', '.'));
+    if (isNaN(hours)) {
+        showNotification('Ungültiger Wert. Bitte eine Zahl eingeben.', 'error');
+        return;
+    }
+
+    adjustOvertime(hours);
 }
 
 // Live updates for timer display
@@ -116,6 +135,9 @@ function render() {
         case 'manual':
             pageContent = renderManualBooking();
             break;
+        case 'flextime':
+            pageContent = renderFlextimePage();
+            break;
         default:
             pageContent = renderDashboard();
     }
@@ -160,7 +182,8 @@ function getPageTitle(page) {
         'dashboard': 'Arbeitszeit',
         'sessions': 'Buchungen',
         'timeinfo': 'Info',
-        'manual': 'Buchung'
+        'manual': 'Buchung',
+        'flextime': 'Gleitzeit'
     };
     return titles[page] || 'Arbeitszeit';
 }

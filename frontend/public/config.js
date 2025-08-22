@@ -19,6 +19,7 @@ let appState = {
     weekData: null,
     sessions: [],
     timeInfo: null,
+    overtimeData: null,
     isLoading: false,
     currentTime: new Date(),
     isOnline: navigator.onLine,

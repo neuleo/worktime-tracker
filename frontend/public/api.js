@@ -73,6 +73,46 @@ async function loadTimeInfo() {
     }
 }
 
+async function loadOvertimeData() {
+    try {
+        const response = await apiCall(`/overtime?user=${CONFIG.USER}`);
+        if (!response.ok) {
+            throw new Error('Failed to load overtime data');
+        }
+        const data = await response.json();
+        appState.overtimeData = data;
+        render();
+    } catch (error) {
+        console.error(error.message);
+        appState.overtimeData = { total_overtime_str: 'Fehler', free_days: 0 };
+        render();
+    }
+}
+
+async function adjustOvertime(hours) {
+    try {
+        const response = await apiCall('/overtime', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                user: CONFIG.USER,
+                hours: hours
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to adjust overtime');
+        }
+
+        showNotification('Gleitzeit erfolgreich angepasst', 'success');
+        await loadOvertimeData(); // Refresh data
+
+    } catch (error) {
+        showNotification(`Fehler: ${error.message}`, 'error');
+    }
+}
+
 async function handleStamp() {
     if (!appState.isOnline) {
         showNotification('Keine Internetverbindung! Bitte versuche es später erneut.', 'error');

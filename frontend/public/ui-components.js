@@ -495,3 +495,65 @@ function renderManualBookingInfo() {
         </div>
     `;
 }
+
+function renderFlextimePage() {
+    const { overtimeData } = appState;
+
+    if (!overtimeData) {
+        return renderLoadingState();
+    }
+
+    const overtimeColor = getOvertimeColor(overtimeData.total_overtime_str);
+
+    return `
+        <div class="space-y-6">
+            <!-- Overtime Status -->
+            <div class="bg-white rounded-xl shadow-sm border p-6">
+                <h2 class="text-lg font-bold text-gray-900 mb-4">Gleitzeit-Übersicht</h2>
+                <div class="text-center space-y-4">
+                    <div>
+                        <div class="text-4xl font-bold ${overtimeColor} font-mono">${formatDuration(overtimeData.total_overtime_str)}</div>
+                        <div class="text-sm text-gray-500">Stunden</div>
+                    </div>
+                    <div>
+                        <div class="text-2xl font-bold text-blue-600">${overtimeData.free_days}</div>
+                        <div class="text-sm text-gray-500">Tage (à 7.8h)</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Manual Adjustment -->
+            <div class="bg-white rounded-xl shadow-sm border">
+                <div class="p-6 border-b">
+                    <h3 class="font-semibold text-gray-800">Gleitzeit anpassen</h3>
+                    <p class="text-sm text-gray-600 mt-1">Setze den aktuellen Gleitzeit-Stand auf einen neuen Wert.</p>
+                </div>
+                <form onsubmit="handleOvertimeSubmit(event)" class="p-6 space-y-4">
+                    <div>
+                        <label for="overtime-hours" class="block text-sm font-medium text-gray-700 mb-2">
+                            Neuer Gleitzeit-Stand (in Dezimalstunden)
+                        </label>
+                        <input 
+                            type="number" 
+                            step="0.01" 
+                            id="overtime-hours" 
+                            placeholder="z.B. 6.8 oder -2.5"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono"
+                        >
+                    </div>
+                    <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                        <p class="text-xs text-yellow-800">
+                            <b>Hinweis:</b> Hiermit wird eine Korrektur-Buchung erstellt, um den aktuellen Stand auf den von dir eingegebenen Wert zu ändern.
+                        </p>
+                    </div>
+                    <button 
+                        type="submit"
+                        class="w-full py-3 px-4 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition-colors"
+                    >
+                        Gleitzeit anpassen
+                    </button>
+                </form>
+            </div>
+        </div>
+    `;
+}
