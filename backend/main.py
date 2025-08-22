@@ -254,7 +254,7 @@ def simulate_daily_presence(bookings: List[WorkSession], new_booking_time: datet
     test_bookings.append(test_booking)
     
     # Sort by timestamp
-    sorted_bookings = sorted(test_bookings, key=lambda x: x.timestamp)
+    sorted_bookings = sorted(test_bookings, key=lambda x: ensure_berlin_tz(x.timestamp))
     
     total_presence = 0
     current_in_time = None
@@ -529,11 +529,11 @@ async def create_manual_booking(booking_data: ManualBookingCreate, db: Session =
         
         # Validate booking sequence
         # Find bookings before and after the new booking time
-        bookings_before = [b for b in day_bookings if b.timestamp < booking_time]
-        bookings_after = [b for b in day_bookings if b.timestamp > booking_time]
+        bookings_before = [b for b in day_bookings if ensure_berlin_tz(b.timestamp) < booking_time]
+        bookings_after = [b for b in day_bookings if ensure_berlin_tz(b.timestamp) > booking_time]
         
         # Check if there's already a booking at the exact same time
-        existing_at_time = [b for b in day_bookings if b.timestamp == booking_time]
+        existing_at_time = [b for b in day_bookings if ensure_berlin_tz(b.timestamp) == booking_time]
         if existing_at_time:
             raise HTTPException(
                 status_code=400, 
