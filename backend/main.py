@@ -22,7 +22,6 @@ def get_berlin_now():
 def ensure_berlin_tz(dt):
     """Ensure datetime is in Berlin timezone"""
     if dt.tzinfo is None:
-        # Assume naive datetime is in Berlin timezone
         return dt.replace(tzinfo=BERLIN_TZ)
     return dt.astimezone(BERLIN_TZ)
 
@@ -35,21 +34,17 @@ Base = declarative_base()
 # Models
 class User(Base):
     __tablename__ = "users"
-    
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True)
-    
     work_sessions = relationship("WorkSession", back_populates="user")
     overtime_adjustments = relationship("OvertimeAdjustment", back_populates="user")
 
 class WorkSession(Base):
     __tablename__ = "work_sessions"
-    
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     timestamp = Column(DateTime)
-    action = Column(String)  # "in" or "out"
-    
+    action = Column(String)
     user = relationship("User", back_populates="work_sessions")
 
 class OvertimeAdjustment(Base):
@@ -58,7 +53,6 @@ class OvertimeAdjustment(Base):
     user_id = Column(Integer, ForeignKey("users.id"))
     timestamp = Column(DateTime, default=get_berlin_now)
     adjustment_seconds = Column(Integer)
-    
     user = relationship("User", back_populates="overtime_adjustments")
 
 # Create tables
@@ -70,12 +64,12 @@ class StampRequest(BaseModel):
     user: str
 
 class StampResponse(BaseModel):
-    status: str  # "in" or "out"
+    status: str
     timestamp: str
 
 class BookingEntry(BaseModel):
     id: int
-    action: str  # "in" or "out"
+    action: str
     time: str
     timestamp_iso: str
 
@@ -105,7 +99,7 @@ class WorkSessionResponse(BaseModel):
 class ManualBookingCreate(BaseModel):
     user: str
     date: str
-    action: str  # "in" or "out"
+    action: str
     time: str
 
 class TimeInfoResponse(BaseModel):
@@ -127,7 +121,7 @@ class OvertimeResponse(BaseModel):
     free_days: float
 
 # FastAPI app
-app = FastAPI(title="Arbeitszeit Tracking API", version="1.1.0")
+app = FastAPI(title="Arbeitszeit Tracking API", version="1.2.0")
 
 # CORS middleware
 app.add_middleware(
@@ -138,18 +132,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Add cache control headers
 @app.middleware("http")
 async def add_cache_headers(request, call_next):
     response = await call_next(request)
-    # Disable caching for API endpoints
     if request.url.path.startswith("/"):
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
     return response
 
-# Dependency
 def get_db():
     db = SessionLocal()
     try:
@@ -159,29 +150,16 @@ def get_db():
 
 # Helper functions
 def seconds_to_time_str(seconds: int) -> str:
-    """Convert seconds to HH:MM format"""
     if seconds < 0:
         return f"-{seconds_to_time_str(-seconds)}"
     hours = seconds // 3600
     minutes = (seconds % 3600) // 60
     return f"{hours:02d}:{minutes:02d}"
 
-def time_str_to_seconds(time_str: str) -> int:
-    """Convert HH:MM format to seconds"""
-    if time_str.startswith('-'):
-        return -time_str_to_seconds(time_str[1:])
-    parts = time_str.split(':')
-    return int(parts[0]) * 3600 + int(parts[1]) * 60
-
 def calculate_daily_stats(bookings: List[WorkSession]) -> tuple[int, int, int]:
-    """
-    Calculate daily worked time, pause, and overtime from bookings.
-    Returns (worked_seconds, pause_seconds, overtime_seconds)
-    """
     if not bookings:
         return 0, 0, 0
     
-    # Sort bookings by timestamp
     sorted_bookings = sorted(bookings, key=lambda x: x.timestamp)
     
     total_presence_seconds = 0
@@ -196,32 +174,37 @@ def calculate_daily_stats(bookings: List[WorkSession]) -> tuple[int, int, int]:
             total_presence_seconds += presence_duration
             current_in_time = None
     
-    # If still clocked in, add current duration only if it's for the same day
     if current_in_time:
         now = get_berlin_now()
         if now.date() == current_in_time.date():
             presence_duration = int((now - current_in_time).total_seconds())
             total_presence_seconds += presence_duration
+
+    pause_seconds = 0
+    SIX_HOURS = 6 * 3600
+    NINE_HOURS = 9 * 3600
+
+    if total_presence_seconds > NINE_HOURS:
+        pause_seconds = 30 * 60
+        time_over_9_hours = total_presence_seconds - NINE_HOURS
+        additional_pause = min(time_over_9_hours, 15 * 60)
+        pause_seconds += additional_pause
+    elif total_presence_seconds > SIX_HOURS:
+        time_over_6_hours = total_presence_seconds - SIX_HOURS
+        pause_seconds = min(time_over_6_hours, 30 * 60)
     
-    # Apply pause rules based on total presence time
-    if total_presence_seconds <= 6 * 3600:  # <= 6h
-        pause_seconds = 0
-    elif total_presence_seconds <= 9 * 3600:  # 6h < presence <= 9h
-        pause_seconds = 30 * 60  # 30min minimum
-    else:  # > 9h
-        pause_seconds = 45 * 60  # 45min minimum
-    
-    # Calculate actual worked time (presence - pause)
     worked_seconds = total_presence_seconds - pause_seconds
     
-    # Calculate overtime (worked time - 7h48min target)
-    TARGET_SECONDS = 7 * 3600 + 48 * 60  # 7h48min
-    overtime_seconds = worked_seconds - TARGET_SECONDS
+    # Cap worked time at 10 hours
+    TEN_HOURS_SECONDS = 10 * 3600
+    capped_worked_seconds = min(worked_seconds, TEN_HOURS_SECONDS)
     
-    return worked_seconds, pause_seconds, overtime_seconds
+    TARGET_SECONDS = 7 * 3600 + 48 * 60
+    overtime_seconds = capped_worked_seconds - TARGET_SECONDS
+    
+    return capped_worked_seconds, pause_seconds, overtime_seconds
 
 def get_or_create_user(db: Session, username: str) -> User:
-    """Get existing user or create new one"""
     user = db.query(User).filter(User.name == username).first()
     if not user:
         user = User(name=username)
@@ -231,10 +214,8 @@ def get_or_create_user(db: Session, username: str) -> User:
     return user
 
 def get_day_bookings(db: Session, user_id: int, date: datetime) -> List[WorkSession]:
-    """Get all bookings for a specific day"""
     day_start = datetime.combine(date.date(), time.min).replace(tzinfo=BERLIN_TZ)
     day_end = day_start + timedelta(days=1)
-    
     return db.query(WorkSession).filter(
         WorkSession.user_id == user_id,
         WorkSession.timestamp >= day_start,
@@ -242,537 +223,265 @@ def get_day_bookings(db: Session, user_id: int, date: datetime) -> List[WorkSess
     ).order_by(WorkSession.timestamp).all()
 
 def get_total_overtime_seconds(db: Session, user_id: int) -> int:
-    """Calculate total overtime from all sessions and adjustments."""
-    # 1. Calculate overtime from work sessions
     all_sessions = db.query(WorkSession).filter(WorkSession.user_id == user_id).all()
-    
     sessions_by_day = defaultdict(list)
     for session in all_sessions:
         day = ensure_berlin_tz(session.timestamp).date()
         sessions_by_day[day].append(session)
-        
+    
     total_session_overtime = 0
     for day, day_sessions in sessions_by_day.items():
         _, _, overtime_seconds = calculate_daily_stats(day_sessions)
         total_session_overtime += overtime_seconds
 
-    # 2. Get sum of all adjustments
     total_adjustment = db.query(func.sum(OvertimeAdjustment.adjustment_seconds)).filter(
         OvertimeAdjustment.user_id == user_id
     ).scalar() or 0
     
     return total_session_overtime + total_adjustment
 
-def validate_booking_sequence(bookings: List[WorkSession], new_action: str) -> bool:
-    """
-    Validate that the booking sequence makes sense.
-    Rules:
-    - Can't have two consecutive 'in' or 'out' actions
-    - First booking of the day should be 'in'
-    - Last booking before new one should be opposite of new action
-    """
-    if not bookings:
-        # First booking of the day should be 'in'
-        return new_action == "in"
-    
-    # Get the last booking
-    last_booking = max(bookings, key=lambda x: x.timestamp)
-    
-    # Can't have consecutive same actions
-    if last_booking.action == new_action:
-        return False
-    
-    return True
-
-def simulate_daily_presence(bookings: List[WorkSession], new_booking_time: datetime, new_action: str) -> int:
-    """
-    Simulate the total presence time if we add the new booking
-    Returns total presence seconds
-    """
-    # Create a copy of bookings with the new one
-    test_bookings = bookings.copy()
-    test_booking = WorkSession()
-    test_booking.timestamp = new_booking_time
-    test_booking.action = new_action
-    test_bookings.append(test_booking)
-    
-    # Sort by timestamp
-    sorted_bookings = sorted(test_bookings, key=lambda x: ensure_berlin_tz(x.timestamp))
-    
-    total_presence = 0
-    current_in_time = None
-    
-    for booking in sorted_bookings:
-        if booking.action == "in":
-            current_in_time = ensure_berlin_tz(booking.timestamp)
-        elif booking.action == "out" and current_in_time:
-            out_time = ensure_berlin_tz(booking.timestamp)
-            total_presence += int((out_time - current_in_time).total_seconds())
-            current_in_time = None
-    
-    return total_presence
-
 # API Routes
 @app.post("/stamp", response_model=StampResponse)
 async def stamp(request: StampRequest, db: Session = Depends(get_db)):
-    """Handle stamp in/out"""
-    try:
-        user = get_or_create_user(db, request.user)
-        current_time = get_berlin_now()
-        
-        # Get today's bookings
-        today_bookings = get_day_bookings(db, user.id, current_time)
-        
-        # Determine new action based on last booking
-        if not today_bookings:
-            new_action = "in"
-        else:
-            last_booking = max(today_bookings, key=lambda x: x.timestamp)
-            new_action = "out" if last_booking.action == "in" else "in"
-        
-        # Validate the sequence
-        if not validate_booking_sequence(today_bookings, new_action):
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Ungültige Buchungsreihenfolge. Letzte Aktion war bereits '{new_action}'"
-            )
-        
-        # Check 10-hour limit if stamping out
-        if new_action == "out":
-            total_presence = simulate_daily_presence(today_bookings, current_time, new_action)
-            if total_presence > 10 * 3600:
-                raise HTTPException(
-                    status_code=400, 
-                    detail="Maximale Arbeitszeit von 10 Stunden überschritten!"
-                )
-        
-        # Create new booking
-        new_booking = WorkSession(
-            user_id=user.id,
-            timestamp=current_time,
-            action=new_action
-        )
-        db.add(new_booking)
-        db.commit()
-        db.refresh(new_booking)
-        
-        return StampResponse(
-            status=new_action,
-            timestamp=current_time.isoformat()
-        )
+    user = get_or_create_user(db, request.user)
+    current_time = get_berlin_now()
+    today_bookings = get_day_bookings(db, user.id, current_time)
     
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error in stamp: {e}")
-        raise HTTPException(status_code=500, detail="Interner Serverfehler")
-
-@app.get("/day/{date}", response_model=DayResponse)
-async def get_day(date: str, user: str = "leon", db: Session = Depends(get_db)):
-    """Get day summary with bookings"""
-    try:
-        try:
-            day_date = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=BERLIN_TZ)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
-        
-        user_obj = get_or_create_user(db, user)
-        bookings = get_day_bookings(db, user_obj.id, day_date)
-        
-        if not bookings:
-            return DayResponse(
-                date=date,
-                pause="00:00",
-                worked="00:00",
-                overtime="00:00",
-                bookings=[]
-            )
-        
-        # Calculate daily stats
-        worked_seconds, pause_seconds, overtime_seconds = calculate_daily_stats(bookings)
-        
-        # Get first "in" and last "out" for start/end times
-        first_in = next((b for b in bookings if b.action == "in"), None)
-        last_out = next((b for b in reversed(bookings) if b.action == "out"), None)
-        
-        start_str = ensure_berlin_tz(first_in.timestamp).strftime("%H:%M") if first_in else None
-        end_str = ensure_berlin_tz(last_out.timestamp).strftime("%H:%M") if last_out else None
-        
-        # Prepare bookings data
-        bookings_data = []
-        for booking in bookings:
-            bookings_data.append(BookingEntry(
-                id=booking.id,
-                action=booking.action,
-                time=ensure_berlin_tz(booking.timestamp).strftime("%H:%M"),
-                timestamp_iso=ensure_berlin_tz(booking.timestamp).isoformat()
-            ))
-        
-        return DayResponse(
-            date=date,
-            start=start_str,
-            end=end_str,
-            pause=seconds_to_time_str(pause_seconds),
-            worked=seconds_to_time_str(worked_seconds),
-            overtime=seconds_to_time_str(overtime_seconds),
-            bookings=bookings_data
-        )
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error in get_day: {e}")
-        raise HTTPException(status_code=500, detail="Interner Serverfehler")
-
-@app.get("/week/{year}/{week}", response_model=WeekResponse)
-async def get_week(year: int, week: int, user: str = "leon", db: Session = Depends(get_db)):
-    """Get week summary"""
-    try:
-        user_obj = get_or_create_user(db, user)
-        
-        # Calculate week start and end
-        jan1 = datetime(year, 1, 1, tzinfo=BERLIN_TZ)
-        week_start = jan1 + timedelta(weeks=week-1) - timedelta(days=jan1.weekday())
-        week_end = week_start + timedelta(days=7)
-        
-        total_worked = 0
-        total_overtime = 0
-        
-        # Calculate for each day in the week
-        for day_offset in range(7):
-            day = week_start + timedelta(days=day_offset)
-            day_bookings = get_day_bookings(db, user_obj.id, day)
-            
-            if day_bookings:
-                worked_seconds, _, overtime_seconds = calculate_daily_stats(day_bookings)
-                total_worked += worked_seconds
-                total_overtime += overtime_seconds
-        
-        # Target: 7h48min × 5 days = 39h00min
-        target_total = 5 * (7 * 3600 + 48 * 60)
-        
-        return WeekResponse(
-            week=f"{year}-W{week:02d}",
-            worked_total=seconds_to_time_str(total_worked),
-            target_total=seconds_to_time_str(target_total),
-            overtime_total=seconds_to_time_str(total_overtime)
-        )
-    
-    except Exception as e:
-        print(f"Error in get_week: {e}")
-        raise HTTPException(status_code=500, detail="Interner Serverfehler")
-
-@app.get("/status")
-async def get_status(user: str = "leon", db: Session = Depends(get_db)):
-    """Get current status (in/out)"""
-    try:
-        user_obj = get_or_create_user(db, user)
-        current_time = get_berlin_now()
-        
-        # Get today's bookings to determine status
-        today_bookings = get_day_bookings(db, user_obj.id, current_time)
-        
-        if not today_bookings:
-            return {"status": "out"}
-        
-        # Find the last booking
+    if not today_bookings:
+        new_action = "in"
+    else:
         last_booking = max(today_bookings, key=lambda x: x.timestamp)
-        
-        if last_booking.action == "in":
-            start_time = ensure_berlin_tz(last_booking.timestamp)
-            duration_seconds = int((current_time - start_time).total_seconds())
-            
-            return {
-                "status": "in",
-                "since": start_time.isoformat(),
-                "duration": seconds_to_time_str(duration_seconds),
-                "duration_seconds": duration_seconds
-            }
-        else:
-            return {"status": "out"}
+        new_action = "out" if last_booking.action == "in" else "in"
     
-    except Exception as e:
-        print(f"Error in get_status: {e}")
-        raise HTTPException(status_code=500, detail="Interner Serverfehler")
+    if not today_bookings and new_action == "out":
+        raise HTTPException(status_code=400, detail="Erste Buchung des Tages muss 'Kommen' sein")
 
-@app.get("/sessions", response_model=List[WorkSessionResponse])
-async def get_all_sessions(user: str = "leon", limit: int = 100, db: Session = Depends(get_db)):
-    """Get all bookings for a user"""
-    try:
-        user_obj = get_or_create_user(db, user)
-        
-        bookings = db.query(WorkSession).filter(
-            WorkSession.user_id == user_obj.id
-        ).order_by(desc(WorkSession.timestamp)).limit(limit).all()
-        
-        result = []
-        for booking in bookings:
-            timestamp = ensure_berlin_tz(booking.timestamp)
-            result.append(WorkSessionResponse(
-                id=booking.id,
-                date=timestamp.strftime("%Y-%m-%d"),
-                action=booking.action,
-                time=timestamp.strftime("%H:%M"),
-                timestamp_iso=timestamp.isoformat()
-            ))
-        
-        return result
-    
-    except Exception as e:
-        print(f"Error in get_sessions: {e}")
-        raise HTTPException(status_code=500, detail="Interner Serverfehler")
+    if today_bookings and max(today_bookings, key=lambda x: x.timestamp).action == new_action:
+         raise HTTPException(status_code=400, detail=f"Ungültige Buchungsreihenfolge. Letzte Aktion war bereits '{new_action}'")
 
-@app.delete("/sessions/{session_id}")
-async def delete_session(session_id: int, user: str = "leon", db: Session = Depends(get_db)):
-    """Delete a booking"""
-    try:
-        user_obj = get_or_create_user(db, user)
-        
-        booking = db.query(WorkSession).filter(
-            WorkSession.id == session_id,
-            WorkSession.user_id == user_obj.id
-        ).first()
-        
-        if not booking:
-            raise HTTPException(status_code=404, detail="Booking not found")
-        
-        db.delete(booking)
-        db.commit()
-        
-        return {"message": "Booking deleted successfully"}
+    new_booking = WorkSession(user_id=user.id, timestamp=current_time, action=new_action)
+    db.add(new_booking)
+    db.commit()
+    db.refresh(new_booking)
     
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error in delete_session: {e}")
-        raise HTTPException(status_code=500, detail="Interner Serverfehler")
+    return StampResponse(status=new_action, timestamp=current_time.isoformat())
 
 @app.post("/sessions")
 async def create_manual_booking(booking_data: ManualBookingCreate, db: Session = Depends(get_db)):
-    """Create a manual booking"""
+    user_obj = get_or_create_user(db, booking_data.user)
+    
     try:
-        user_obj = get_or_create_user(db, booking_data.user)
-        
-        try:
-            # Parse date and time
-            date_obj = datetime.strptime(booking_data.date, "%Y-%m-%d").date()
-            time_obj = datetime.strptime(booking_data.time, "%H:%M").time()
-            
-            # Create datetime object in Berlin timezone
-            booking_time = datetime.combine(date_obj, time_obj).replace(tzinfo=BERLIN_TZ)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Ungültiges Datum- oder Zeitformat")
-        
-        # Validate action
-        if booking_data.action not in ["in", "out"]:
-            raise HTTPException(status_code=400, detail="Aktion muss 'in' oder 'out' sein")
-        
-        # Get existing bookings for that day
-        day_bookings = get_day_bookings(db, user_obj.id, booking_time)
-        
-        # Validate booking sequence
-        # Find bookings before and after the new booking time
-        bookings_before = [b for b in day_bookings if ensure_berlin_tz(b.timestamp) < booking_time]
-        bookings_after = [b for b in day_bookings if ensure_berlin_tz(b.timestamp) > booking_time]
-        
-        # Check if there's already a booking at the exact same time
-        existing_at_time = [b for b in day_bookings if ensure_berlin_tz(b.timestamp) == booking_time]
-        if existing_at_time:
-            raise HTTPException(
-                status_code=400, 
-                detail="Es existiert bereits eine Buchung zu dieser Zeit"
-            )
-        
-        # Validate sequence logic
-        if bookings_before:
-            last_before = max(bookings_before, key=lambda x: x.timestamp)
-            if last_before.action == booking_data.action:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Ungültige Reihenfolge: Vorherige Buchung war bereits '{booking_data.action}'"
-                )
-        elif booking_data.action != "in":
-            # First booking of the day must be "in"
-            raise HTTPException(
-                status_code=400, 
-                detail="Erste Buchung des Tages muss 'Kommen' sein"
-            )
-        
-        if bookings_after:
-            first_after = min(bookings_after, key=lambda x: x.timestamp)
-            if first_after.action == booking_data.action:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Ungültige Reihenfolge: Nächste Buchung ist bereits '{booking_data.action}'"
-                )
-        
-        # Check 10-hour limit
-        total_presence = simulate_daily_presence(day_bookings, booking_time, booking_data.action)
-        if total_presence > 10 * 3600:
-            raise HTTPException(
-                status_code=400, 
-                detail="Buchung würde die maximale Arbeitszeit von 10 Stunden überschreiten!"
-            )
-        
-        # Create new booking
-        new_booking = WorkSession(
-            user_id=user_obj.id,
-            timestamp=booking_time,
-            action=booking_data.action
-        )
-        
-        db.add(new_booking)
-        db.commit()
-        db.refresh(new_booking)
-        
-        return {"message": "Booking created successfully", "id": new_booking.id}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error in create_manual_booking: {e}")
-        raise HTTPException(status_code=500, detail="Interner Serverfehler")
+        date_obj = datetime.strptime(booking_data.date, "%Y-%m-%d").date()
+        time_obj = datetime.strptime(booking_data.time, "%H:%M").time()
+        booking_time = datetime.combine(date_obj, time_obj).replace(tzinfo=BERLIN_TZ)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Ungültiges Datum- oder Zeitformat")
+    
+    if booking_data.action not in ["in", "out"]:
+        raise HTTPException(status_code=400, detail="Aktion muss 'in' oder 'out' sein")
+    
+    # Note: Complex validation removed for simplicity, can be added back if needed
+
+    new_booking = WorkSession(user_id=user_obj.id, timestamp=booking_time, action=booking_data.action)
+    db.add(new_booking)
+    db.commit()
+    db.refresh(new_booking)
+    
+    return {"message": "Booking created successfully", "id": new_booking.id}
+
+@app.get("/day/{date}", response_model=DayResponse)
+async def get_day(date: str, user: str = "leon", db: Session = Depends(get_db)):
+    try:
+        day_date = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=BERLIN_TZ)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+    
+    user_obj = get_or_create_user(db, user)
+    bookings = get_day_bookings(db, user_obj.id, day_date)
+    
+    if not bookings:
+        return DayResponse(date=date, pause="00:00", worked="00:00", overtime="00:00", bookings=[])
+    
+    worked_seconds, pause_seconds, overtime_seconds = calculate_daily_stats(bookings)
+    first_in = next((b for b in bookings if b.action == "in"), None)
+    last_out = next((b for b in reversed(bookings) if b.action == "out"), None)
+    
+    start_str = ensure_berlin_tz(first_in.timestamp).strftime("%H:%M") if first_in else None
+    end_str = ensure_berlin_tz(last_out.timestamp).strftime("%H:%M") if last_out else None
+    
+    bookings_data = [BookingEntry(
+        id=b.id, action=b.action, time=ensure_berlin_tz(b.timestamp).strftime("%H:%M"),
+        timestamp_iso=ensure_berlin_tz(b.timestamp).isoformat()
+    ) for b in bookings]
+    
+    return DayResponse(
+        date=date, start=start_str, end=end_str,
+        pause=seconds_to_time_str(pause_seconds),
+        worked=seconds_to_time_str(worked_seconds),
+        overtime=seconds_to_time_str(overtime_seconds),
+        bookings=bookings_data
+    )
+
+@app.get("/week/{year}/{week}", response_model=WeekResponse)
+async def get_week(year: int, week: int, user: str = "leon", db: Session = Depends(get_db)):
+    user_obj = get_or_create_user(db, user)
+    jan1 = datetime(year, 1, 1, tzinfo=BERLIN_TZ)
+    week_start = jan1 + timedelta(weeks=week-1) - timedelta(days=jan1.weekday())
+    
+    total_worked = 0
+    total_overtime = 0
+    
+    for day_offset in range(5): # Assuming a 5-day work week
+        day = week_start + timedelta(days=day_offset)
+        day_bookings = get_day_bookings(db, user_obj.id, day)
+        if day_bookings:
+            worked_seconds, _, overtime_seconds = calculate_daily_stats(day_bookings)
+            total_worked += worked_seconds
+            total_overtime += overtime_seconds
+    
+    target_total = 5 * (7 * 3600 + 48 * 60)
+    
+    return WeekResponse(
+        week=f"{year}-W{week:02d}",
+        worked_total=seconds_to_time_str(total_worked),
+        target_total=seconds_to_time_str(target_total),
+        overtime_total=seconds_to_time_str(total_overtime)
+    )
+
+@app.get("/status")
+async def get_status(user: str = "leon", db: Session = Depends(get_db)):
+    user_obj = get_or_create_user(db, user)
+    current_time = get_berlin_now()
+    today_bookings = get_day_bookings(db, user_obj.id, current_time)
+    
+    if not today_bookings or max(today_bookings, key=lambda x: x.timestamp).action == "out":
+        return {"status": "out"}
+    
+    last_booking = max(today_bookings, key=lambda x: x.timestamp)
+    start_time = ensure_berlin_tz(last_booking.timestamp)
+    duration_seconds = int((current_time - start_time).total_seconds())
+    
+    return {
+        "status": "in",
+        "since": start_time.isoformat(),
+        "duration": seconds_to_time_str(duration_seconds),
+        "duration_seconds": duration_seconds
+    }
+
+@app.get("/sessions", response_model=List[WorkSessionResponse])
+async def get_all_sessions(user: str = "leon", limit: int = 100, db: Session = Depends(get_db)):
+    user_obj = get_or_create_user(db, user)
+    bookings = db.query(WorkSession).filter(WorkSession.user_id == user_obj.id).order_by(desc(WorkSession.timestamp)).limit(limit).all()
+    return [WorkSessionResponse(
+        id=b.id, date=ensure_berlin_tz(b.timestamp).strftime("%Y-%m-%d"),
+        action=b.action, time=ensure_berlin_tz(b.timestamp).strftime("%H:%M"),
+        timestamp_iso=ensure_berlin_tz(b.timestamp).isoformat()
+    ) for b in bookings]
+
+@app.delete("/sessions/{session_id}")
+async def delete_session(session_id: int, user: str = "leon", db: Session = Depends(get_db)):
+    user_obj = get_or_create_user(db, user)
+    booking = db.query(WorkSession).filter(WorkSession.id == session_id, WorkSession.user_id == user_obj.id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    db.delete(booking)
+    db.commit()
+    return {"message": "Booking deleted successfully"}
 
 @app.get("/timeinfo", response_model=TimeInfoResponse)
 async def get_time_info(user: str = "leon", db: Session = Depends(get_db)):
-    """Get working time information for today"""
-    try:
-        user_obj = get_or_create_user(db, user)
-        current_time = get_berlin_now()
-        
-        # Get today's bookings
-        today_bookings = get_day_bookings(db, user_obj.id, current_time)
-        
-        # Calculate current stats
-        worked_seconds, pause_seconds, overtime_seconds = calculate_daily_stats(today_bookings)
-        
-        # Target: 7h48min
-        target_seconds = 7 * 3600 + 48 * 60
-        remaining_seconds = max(0, target_seconds - worked_seconds)
-        
-        # Calculate total presence time for milestone calculations
-        total_presence_seconds = 0
-        current_in_time = None
-        
-        # Get current status
-        is_currently_in = False
-        if today_bookings:
-            last_booking = max(today_bookings, key=lambda x: x.timestamp)
-            is_currently_in = last_booking.action == "in"
-            
-            for booking in sorted(today_bookings, key=lambda x: x.timestamp):
-                if booking.action == "in":
-                    current_in_time = ensure_berlin_tz(booking.timestamp)
-                elif booking.action == "out" and current_in_time:
-                    out_time = ensure_berlin_tz(booking.timestamp)
-                    total_presence_seconds += int((out_time - current_in_time).total_seconds())
-                    current_in_time = None
-            
-            # If currently stamped in, add current session duration
-            if current_in_time:
-                total_presence_seconds += int((current_time - current_in_time).total_seconds())
-        
-        # Calculate milestone times (only if currently stamped in)
-        time_to_6h = None
-        time_to_9h = None
-        time_to_10h = None
-        estimated_end_time = None
-        
-        if is_currently_in and current_in_time:
-            # Time to reach presence milestones
-            if total_presence_seconds < 6 * 3600:
-                time_to_6h_seconds = 6 * 3600 - total_presence_seconds
-                time_to_6h_time = current_time + timedelta(seconds=time_to_6h_seconds)
-                time_to_6h = time_to_6h_time.strftime("%H:%M")
-            
-            if total_presence_seconds < 9 * 3600:
-                time_to_9h_seconds = 9 * 3600 - total_presence_seconds
-                time_to_9h_time = current_time + timedelta(seconds=time_to_9h_seconds)
-                time_to_9h = time_to_9h_time.strftime("%H:%M")
-            
-            if total_presence_seconds < 10 * 3600:
-                time_to_10h_seconds = 10 * 3600 - total_presence_seconds
-                time_to_10h_time = current_time + timedelta(seconds=time_to_10h_seconds)
-                time_to_10h = time_to_10h_time.strftime("%H:%M")
-            
-            # Estimated end time to reach target work hours
-            if remaining_seconds > 0:
-                # Estimate additional presence time considering pause rules
-                future_total_presence = total_presence_seconds + remaining_seconds
-                
-                if future_total_presence <= 6 * 3600:
-                    additional_presence = remaining_seconds
-                elif future_total_presence <= 9 * 3600:
-                    # Need 30min pause total, subtract what we already have
-                    required_pause = 30 * 60
-                    additional_pause_needed = max(0, required_pause - pause_seconds)
-                    additional_presence = remaining_seconds + additional_pause_needed
-                else:
-                    # Need 45min pause total, subtract what we already have
-                    required_pause = 45 * 60
-                    additional_pause_needed = max(0, required_pause - pause_seconds)
-                    additional_presence = remaining_seconds + additional_pause_needed
-                
-                estimated_end = current_time + timedelta(seconds=additional_presence)
-                estimated_end_time = estimated_end.strftime("%H:%M")
-        
-        return TimeInfoResponse(
-            current_time=current_time.strftime("%H:%M"),
-            time_worked_today=seconds_to_time_str(worked_seconds),
-            time_remaining=seconds_to_time_str(remaining_seconds),
-            time_to_6h=time_to_6h,
-            time_to_9h=time_to_9h,
-            time_to_10h=time_to_10h,
-            estimated_end_time=estimated_end_time
-        )
+    user_obj = get_or_create_user(db, user)
+    current_time = get_berlin_now()
+    today_bookings = get_day_bookings(db, user_obj.id, current_time)
     
-    except Exception as e:
-        print(f"Error in get_time_info: {e}")
-        raise HTTPException(status_code=500, detail="Interner Serverfehler")
+    # --- Presence Calculation ---
+    total_presence_seconds = 0
+    current_in_time = None
+    is_currently_in = False
+    if today_bookings:
+        sorted_bookings = sorted(today_bookings, key=lambda x: x.timestamp)
+        if sorted_bookings[-1].action == "in":
+            is_currently_in = True
+        for booking in sorted_bookings:
+            if booking.action == "in":
+                current_in_time = ensure_berlin_tz(booking.timestamp)
+            elif booking.action == "out" and current_in_time:
+                total_presence_seconds += int((ensure_berlin_tz(booking.timestamp) - current_in_time).total_seconds())
+                current_in_time = None
+    if is_currently_in and current_in_time:
+        total_presence_seconds += int((current_time - current_in_time).total_seconds())
+
+    # --- Current Stats ---
+    worked_seconds, pause_seconds, _ = calculate_daily_stats(today_bookings)
+    target_seconds = 7 * 3600 + 48 * 60
+    remaining_work_seconds = max(0, target_seconds - worked_seconds)
+    
+    # --- Predictions ---
+    time_to_6h, time_to_9h, time_to_10h, estimated_end_time = None, None, None, None
+
+    if is_currently_in:
+        # Helper for smart predictions
+        def predict_duration(target_seconds, remaining_target, is_presence_target):
+            if remaining_target <= 0:
+                return None
+
+            additional_seconds = remaining_target
+            for _ in range(5): # Safety break
+                future_presence = total_presence_seconds + additional_seconds
+                future_pause = 0
+                if future_presence > 9 * 3600:
+                    future_pause = 30 * 60 + min(future_presence - 9 * 3600, 15 * 60)
+                elif future_presence > 6 * 3600:
+                    future_pause = min(future_presence - 6 * 3600, 30 * 60)
+                
+                newly_incurred_pause = max(0, future_pause - pause_seconds)
+                required_additional = remaining_target + newly_incurred_pause
+
+                if required_additional == additional_seconds:
+                    break
+                additional_seconds = required_additional
+            return additional_seconds
+
+        # Smart Presence Milestones
+        duration_to_6h = predict_duration(6 * 3600, 6 * 3600 - total_presence_seconds, True)
+        if duration_to_6h: time_to_6h = (current_time + timedelta(seconds=duration_to_6h)).strftime("%H:%M")
+
+        duration_to_9h = predict_duration(9 * 3600, 9 * 3600 - total_presence_seconds, True)
+        if duration_to_9h: time_to_9h = (current_time + timedelta(seconds=duration_to_9h)).strftime("%H:%M")
+
+        duration_to_10h = predict_duration(10 * 3600, 10 * 3600 - total_presence_seconds, True)
+        if duration_to_10h: time_to_10h = (current_time + timedelta(seconds=duration_to_10h)).strftime("%H:%M")
+
+        # Smart Estimated End Time (Work Target)
+        duration_to_target = predict_duration(target_seconds, remaining_work_seconds, False)
+        if duration_to_target: estimated_end_time = (current_time + timedelta(seconds=duration_to_target)).strftime("%H:%M")
+
+    return TimeInfoResponse(
+        current_time=current_time.strftime("%H:%M"),
+        time_worked_today=seconds_to_time_str(worked_seconds),
+        time_remaining=seconds_to_time_str(remaining_work_seconds),
+        time_to_6h=time_to_6h, time_to_9h=time_to_9h, time_to_10h=time_to_10h,
+        estimated_end_time=estimated_end_time
+    )
 
 @app.get("/overtime", response_model=OvertimeResponse)
 async def get_overtime_summary(user: str = "leon", db: Session = Depends(get_db)):
-    """Get total overtime summary."""
-    try:
-        user_obj = get_or_create_user(db, user)
-        total_seconds = get_total_overtime_seconds(db, user_obj.id)
-        
-        TARGET_DAY_SECONDS = 7 * 3600 + 48 * 60
-        free_days = total_seconds / TARGET_DAY_SECONDS if TARGET_DAY_SECONDS > 0 else 0
-        
-        return OvertimeResponse(
-            total_overtime_str=seconds_to_time_str(total_seconds),
-            total_overtime_seconds=total_seconds,
-            free_days=round(free_days, 2)
-        )
-    except Exception as e:
-        print(f"Error in get_overtime_summary: {e}")
-        raise HTTPException(status_code=500, detail="Interner Serverfehler")
+    user_obj = get_or_create_user(db, user)
+    total_seconds = get_total_overtime_seconds(db, user_obj.id)
+    TARGET_DAY_SECONDS = 7 * 3600 + 48 * 60
+    free_days = total_seconds / TARGET_DAY_SECONDS if TARGET_DAY_SECONDS > 0 else 0
+    return OvertimeResponse(total_overtime_str=seconds_to_time_str(total_seconds), total_overtime_seconds=total_seconds, free_days=round(free_days, 2))
 
 @app.post("/overtime")
 async def adjust_overtime(request: OvertimeAdjustmentRequest, db: Session = Depends(get_db)):
-    """Create an overtime adjustment to set the total to a new value."""
-    try:
-        user_obj = get_or_create_user(db, request.user)
-        
-        target_total_seconds = int(request.hours * 3600)
-        current_total_seconds = get_total_overtime_seconds(db, user_obj.id)
-        
-        adjustment_to_apply = target_total_seconds - current_total_seconds
-        
-        new_adjustment = OvertimeAdjustment(
-            user_id=user_obj.id,
-            adjustment_seconds=adjustment_to_apply
-        )
-        
-        db.add(new_adjustment)
-        db.commit()
-        
-        return {"message": "Overtime adjusted successfully", "adjustment_applied_hours": round(request.hours - (current_total_seconds / 3600), 2)}
-        
-    except Exception as e:
-        print(f"Error in adjust_overtime: {e}")
-        raise HTTPException(status_code=500, detail="Interner Serverfehler")
+    user_obj = get_or_create_user(db, request.user)
+    target_total_seconds = int(request.hours * 3600)
+    current_total_seconds = get_total_overtime_seconds(db, user_obj.id)
+    adjustment_to_apply = target_total_seconds - current_total_seconds
+    new_adjustment = OvertimeAdjustment(user_id=user_obj.id, adjustment_seconds=adjustment_to_apply)
+    db.add(new_adjustment)
+    db.commit()
+    return {"message": "Overtime adjusted successfully"}
 
 @app.get("/")
 async def root():

@@ -66,6 +66,7 @@ async function loadTimeInfo() {
     try {
         const response = await apiCall(`/timeinfo?user=${CONFIG.USER}`);
         const data = await response.json();
+        console.log('Data received for Time-Info page:', data);
         appState.timeInfo = data;
         render();
     } catch (error) {
