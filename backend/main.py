@@ -230,9 +230,15 @@ def get_total_overtime_seconds(db: Session, user_id: int) -> int:
         sessions_by_day[day].append(session)
     
     total_session_overtime = 0
+    current_berlin_date = get_berlin_now().date()
+
     for day, day_sessions in sessions_by_day.items():
-        _, _, overtime_seconds = calculate_daily_stats(day_sessions)
-        total_session_overtime += overtime_seconds
+        is_today = (day == current_berlin_date)
+        last_booking_action = max(day_sessions, key=lambda x: x.timestamp).action
+
+        if not is_today or (is_today and last_booking_action == "out"):
+            _, _, overtime_seconds = calculate_daily_stats(day_sessions)
+            total_session_overtime += overtime_seconds
 
     total_adjustment = db.query(func.sum(OvertimeAdjustment.adjustment_seconds)).filter(
         OvertimeAdjustment.user_id == user_id
