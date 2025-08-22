@@ -14,16 +14,23 @@ function closeMenu() {
 }
 
 function navigateTo(page) {
+    // Clear all specific page timers first to avoid conflicts
+    if (timers.liveUpdate) clearInterval(timers.liveUpdate);
+    if (timers.timeInfoLiveUpdate) clearInterval(timers.timeInfoLiveUpdate);
+
     appState.currentPage = page;
     closeMenu();
     
-    // Load data for specific pages
+    // Load data for specific pages and set up live updates
     if (page === 'sessions') {
         loadSessions();
     } else if (page === 'timeinfo') {
-        loadTimeInfo();
+        loadTimeInfo(); // Initial load
+        setupTimeInfoLiveUpdates(); // Start periodic updates
     } else if (page === 'flextime') {
         loadOvertimeData();
+    } else if (page === 'dashboard') {
+        // Dashboard data is loaded by init and periodic refresh, live updates are handled by setupLiveUpdates
     }
     
     render();
@@ -139,6 +146,19 @@ function updateLiveDuration() {
     }
 }
 
+// Live updates for timeinfo page
+function setupTimeInfoLiveUpdates() {
+    // Clear existing timer
+    if (timers.timeInfoLiveUpdate) clearInterval(timers.timeInfoLiveUpdate);
+
+    // Only start live updates if on timeinfo page
+    if (appState.currentPage === 'timeinfo') {
+        timers.timeInfoLiveUpdate = setInterval(() => {
+            loadTimeInfo();
+        }, CONFIG.LIVE_UPDATE_INTERVAL);
+    }
+}
+
 // Update clock every second
 function startClock() {
     if (timers.clock) clearInterval(timers.clock);
@@ -208,10 +228,7 @@ function render() {
         </div>
     `;
 
-    // Setup live updates after render if stamped in and on dashboard
-    if (currentPage === 'dashboard') {
-        setupLiveUpdates();
-    }
+    
 }
 
 function getPageTitle(page) {
@@ -295,6 +312,12 @@ function init() {
         loadWeekData()
     ]).then(() => {
         console.log('✅ Initial data loaded');
+        // After initial data load, set up live updates for the initial page
+        if (appState.currentPage === 'dashboard') {
+            setupLiveUpdates();
+        } else if (appState.currentPage === 'timeinfo') {
+            setupTimeInfoLiveUpdates();
+        }
     }).catch((error) => {
         console.error('❌ Failed to load initial data:', error);
         showNotification('Fehler beim Laden der Daten', 'error');
@@ -313,6 +336,7 @@ function init() {
 window.addEventListener('beforeunload', () => {
     console.log('🧹 Cleaning up timers...');
     if (timers.liveUpdate) clearInterval(timers.liveUpdate);
+    if (timers.timeInfoLiveUpdate) clearInterval(timers.timeInfoLiveUpdate);
     if (timers.clock) clearInterval(timers.clock);
 });
 
@@ -326,8 +350,15 @@ document.addEventListener('visibilitychange', () => {
             if (appState.currentPage === 'dashboard') {
                 loadTodayData();
                 loadWeekData();
+                setupLiveUpdates(); // Restart dashboard live updates
+            } else if (appState.currentPage === 'timeinfo') {
+                loadTimeInfo(); // Refresh time info
+                setupTimeInfoLiveUpdates(); // Restart time info live updates
             }
         }
+    } else { // Page became hidden
+        if (timers.liveUpdate) clearInterval(timers.liveUpdate);
+        if (timers.timeInfoLiveUpdate) clearInterval(timers.timeInfoLiveUpdate);
     }
 });
 
@@ -335,6 +366,11 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('focus', () => {
     if (appState.isOnline) {
         loadStatus();
+        if (appState.currentPage === 'dashboard') {
+            setupLiveUpdates();
+        } else if (appState.currentPage === 'timeinfo') {
+            setupTimeInfoLiveUpdates();
+        }
     }
 });
 
@@ -347,6 +383,10 @@ setInterval(() => {
             loadTodayData();
             loadWeekData();
         }
+        // No need to call setupLiveUpdates here, as it's handled by visibilitychange/focus/navigateTo
+    } else { // If offline or hidden, clear live update timers
+        if (timers.liveUpdate) clearInterval(timers.liveUpdate);
+        if (timers.timeInfoLiveUpdate) clearInterval(timers.timeInfoLiveUpdate);
     }
 }, 5 * 60 * 1000); // 5 minutes
 

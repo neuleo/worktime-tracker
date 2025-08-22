@@ -30,5 +30,6 @@ let appState = {
 // Timer management
 let timers = {
     liveUpdate: null,
-    clock: null
+    clock: null,
+    timeInfoLiveUpdate: null
 };
