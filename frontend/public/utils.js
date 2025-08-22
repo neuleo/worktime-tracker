@@ -105,6 +105,55 @@ function secondsToTimeStr(seconds) {
     return isNegative ? `-${timeStr}` : timeStr;
 }
 
+function calculateDailyStatsJS(bookings) {
+    if (!bookings || bookings.length === 0) {
+        return { worked: '00:00', pause: '00:00', overtime: '00:00' };
+    }
+
+    const sortedBookings = bookings.sort((a, b) => a.time.localeCompare(b.time));
+    
+    let totalPresenceSeconds = 0;
+    let currentInTime = null;
+    
+    for (const booking of sortedBookings) {
+        const timeParts = booking.time.split(':').map(Number);
+        const timeInSeconds = (timeParts[0] * 3600) + (timeParts[1] * 60);
+        
+        if (booking.action === 'in') {
+            currentInTime = timeInSeconds;
+        } else if (booking.action === 'out' && currentInTime !== null) {
+            totalPresenceSeconds += timeInSeconds - currentInTime;
+            currentInTime = null;
+        }
+    }
+    
+    let pauseSeconds = 0;
+    const SIX_HOURS = 6 * 3600;
+    const NINE_HOURS = 9 * 3600;
+
+    if (totalPresenceSeconds > NINE_HOURS) {
+        pauseSeconds = 30 * 60;
+        const timeOver9 = totalPresenceSeconds - NINE_HOURS;
+        pauseSeconds += Math.min(timeOver9, 15 * 60);
+    } else if (totalPresenceSeconds > SIX_HOURS) {
+        const timeOver6 = totalPresenceSeconds - SIX_HOURS;
+        pauseSeconds = Math.min(timeOver6, 30 * 60);
+    }
+    
+    const workedSeconds = totalPresenceSeconds - pauseSeconds;
+    const TEN_HOURS = 10 * 3600;
+    const cappedWorkedSeconds = Math.min(workedSeconds, TEN_HOURS);
+    
+    const TARGET_SECONDS = 7 * 3600 + 48 * 60;
+    const overtimeSeconds = cappedWorkedSeconds - TARGET_SECONDS;
+    
+    return {
+        worked: secondsToTimeStr(cappedWorkedSeconds),
+        pause: secondsToTimeStr(pauseSeconds),
+        overtime: secondsToTimeStr(overtimeSeconds)
+    };
+}
+
 function showNotification(message, type = 'info') {
     const notification = document.createElement('div');
     const bgColor = type === 'error' ? 'bg-red-500' : type === 'success' ? 'bg-green-500' : 'bg-blue-500';

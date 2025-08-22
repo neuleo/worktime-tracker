@@ -66,6 +66,33 @@ function handleOvertimeSubmit(event) {
     closeOvertimeModal();
 }
 
+function handlePlannedDepartureChange(event) {
+    const plannedTime = event.target.value;
+    const resultEl = document.getElementById('what-if-result');
+
+    if (!plannedTime || !appState.dayData) {
+        resultEl.innerHTML = '';
+        return;
+    }
+
+    // Deep copy today's bookings to avoid modifying the state directly
+    let tempBookings = JSON.parse(JSON.stringify(appState.dayData.bookings));
+
+    // Add the planned departure as a temporary 'out' booking
+    tempBookings.push({ action: 'out', time: plannedTime });
+
+    const stats = calculateDailyStatsJS(tempBookings);
+
+    // Display the result
+    const overtimeColor = getOvertimeColor(stats.overtime);
+    resultEl.innerHTML = `
+        <div class="text-center mt-4 p-4 bg-gray-50 rounded-lg">
+            <p class="text-sm text-gray-600">Errechnete Überstunden:</p>
+            <p class="font-mono text-2xl font-bold ${overtimeColor}">${formatDuration(stats.overtime)}</p>
+        </div>
+    `;
+}
+
 function openOvertimeModal() {
     const modal = document.getElementById('overtime-modal');
     if (modal) {
@@ -108,11 +135,6 @@ function updateLiveDuration() {
         const durationEl = document.getElementById('live-duration');
         if (durationEl) {
             durationEl.textContent = durationStr;
-        }
-
-        // Update time info if on that page
-        if (appState.currentPage === 'timeinfo') {
-            loadTimeInfo();
         }
     }
 }
