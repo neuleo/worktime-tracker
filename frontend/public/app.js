@@ -63,6 +63,21 @@ function handleOvertimeSubmit(event) {
     }
 
     adjustOvertime(hours);
+    closeOvertimeModal();
+}
+
+function openOvertimeModal() {
+    const modal = document.getElementById('overtime-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+    }
+}
+
+function closeOvertimeModal() {
+    const modal = document.getElementById('overtime-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
 }
 
 // Live updates for timer display

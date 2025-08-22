@@ -508,8 +508,13 @@ function renderFlextimePage() {
     return `
         <div class="space-y-6">
             <!-- Overtime Status -->
-            <div class="bg-white rounded-xl shadow-sm border p-6">
-                <h2 class="text-lg font-bold text-gray-900 mb-4">Gleitzeit-Übersicht</h2>
+            <div class="bg-white rounded-xl shadow-sm border p-6 relative">
+                <div class="flex justify-between items-start">
+                    <h2 class="text-lg font-bold text-gray-900 mb-4">Gleitzeit-Übersicht</h2>
+                    <button onclick="openOvertimeModal()" class="p-2 text-gray-500 hover:bg-gray-100 rounded-full">
+                        ${createIcon('settings', 'h-5 w-5')}
+                    </button>
+                </div>
                 <div class="text-center space-y-4">
                     <div>
                         <div class="text-4xl font-bold ${overtimeColor} font-mono">${formatDuration(overtimeData.total_overtime_str)}</div>
@@ -521,12 +526,16 @@ function renderFlextimePage() {
                     </div>
                 </div>
             </div>
+        </div>
 
-            <!-- Manual Adjustment -->
-            <div class="bg-white rounded-xl shadow-sm border">
-                <div class="p-6 border-b">
-                    <h3 class="font-semibold text-gray-800">Gleitzeit anpassen</h3>
-                    <p class="text-sm text-gray-600 mt-1">Setze den aktuellen Gleitzeit-Stand auf einen neuen Wert.</p>
+        <!-- Modal for adjustment -->
+        <div id="overtime-modal" class="fixed inset-0 bg-black bg-opacity-60 z-50 hidden items-center justify-center p-4">
+            <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm mx-auto">
+                <div class="p-6 border-b flex justify-between items-center">
+                    <h3 class="font-semibold text-lg text-gray-800">Gleitzeit anpassen</h3>
+                    <button onclick="closeOvertimeModal()" class="p-2 text-gray-400 hover:bg-gray-100 rounded-full">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </button>
                 </div>
                 <form onsubmit="handleOvertimeSubmit(event)" class="p-6 space-y-4">
                     <div>

@@ -79,3 +79,12 @@ input, textarea, select {
 .scrollbar-hide::-webkit-scrollbar {
     display: none;
 }
+
+/* Modal styles */
+#overtime-modal.hidden {
+    display: none;
+}
+
+#overtime-modal {
+    display: flex; /* Use flexbox for centering */
+}
