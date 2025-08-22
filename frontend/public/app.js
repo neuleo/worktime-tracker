@@ -35,15 +35,15 @@ function setActiveTab(tab) {
 function handleManualSubmit(event) {
     event.preventDefault();
     const date = document.getElementById('manual-date').value;
-    const startTime = document.getElementById('manual-start').value;
-    const endTime = document.getElementById('manual-end').value;
+    const action = document.getElementById('manual-action').value;
+    const time = document.getElementById('manual-time').value;
 
-    if (!date || !startTime || !endTime) {
+    if (!date || !action || !time) {
         showNotification('Bitte alle Felder ausfüllen', 'error');
         return;
     }
 
-    createManualSession(date, startTime, endTime);
+    createManualBooking(date, action, time);
 }
 
 // Live updates for timer display

@@ -152,7 +152,7 @@ async function deleteSession(sessionId) {
     }
 }
 
-async function createManualSession(date, startTime, endTime) {
+async function createManualBooking(date, action, time) {
     try {
         const response = await apiCall('/sessions', {
             method: 'POST',
@@ -160,22 +160,22 @@ async function createManualSession(date, startTime, endTime) {
             body: JSON.stringify({
                 user: CONFIG.USER,
                 date: date,
-                start_time: startTime,
-                end_time: endTime
+                action: action,
+                time: time
             })
         });
 
         if (!response.ok) {
             const error = await response.json();
-            throw new Error(error.detail || 'Failed to create session');
+            throw new Error(error.detail || 'Failed to create booking');
         }
 
         showNotification('Buchung erfolgreich erstellt', 'success');
         
         // Clear form
-        document.getElementById('manual-date').value = '';
-        document.getElementById('manual-start').value = '';
-        document.getElementById('manual-end').value = '';
+        document.getElementById('manual-date').value = new Date().toISOString().split('T')[0];
+        document.getElementById('manual-action').value = 'in';
+        document.getElementById('manual-time').value = '';
         
         // Refresh data
         await Promise.all([

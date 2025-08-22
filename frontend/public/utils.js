@@ -52,6 +52,59 @@ function groupSessionsByDate(sessions) {
     return grouped;
 }
 
+function calculateDayOvertimeFromBookings(bookings) {
+    if (!bookings || bookings.length === 0) {
+        return { worked: '00:00', pause: '00:00', overtime: '00:00' };
+    }
+
+    // Sort bookings by time
+    const sortedBookings = bookings.sort((a, b) => a.time.localeCompare(b.time));
+    
+    let totalPresenceSeconds = 0;
+    let currentInTime = null;
+    
+    for (const booking of sortedBookings) {
+        const [hours, minutes] = booking.time.split(':').map(Number);
+        const timeInSeconds = hours * 3600 + minutes * 60;
+        
+        if (booking.action === 'in') {
+            currentInTime = timeInSeconds;
+        } else if (booking.action === 'out' && currentInTime !== null) {
+            totalPresenceSeconds += timeInSeconds - currentInTime;
+            currentInTime = null;
+        }
+    }
+    
+    // Apply pause rules
+    let pauseSeconds = 0;
+    if (totalPresenceSeconds <= 6 * 3600) {
+        pauseSeconds = 0;
+    } else if (totalPresenceSeconds <= 9 * 3600) {
+        pauseSeconds = 30 * 60; // 30min
+    } else {
+        pauseSeconds = 45 * 60; // 45min
+    }
+    
+    const workedSeconds = totalPresenceSeconds - pauseSeconds;
+    const targetSeconds = 7 * 3600 + 48 * 60; // 7h48min
+    const overtimeSeconds = workedSeconds - targetSeconds;
+    
+    return {
+        worked: secondsToTimeStr(workedSeconds),
+        pause: secondsToTimeStr(pauseSeconds),
+        overtime: secondsToTimeStr(overtimeSeconds)
+    };
+}
+
+function secondsToTimeStr(seconds) {
+    const isNegative = seconds < 0;
+    const absSeconds = Math.abs(seconds);
+    const hours = Math.floor(absSeconds / 3600);
+    const minutes = Math.floor((absSeconds % 3600) / 60);
+    const timeStr = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+    return isNegative ? `-${timeStr}` : timeStr;
+}
+
 function showNotification(message, type = 'info') {
     const notification = document.createElement('div');
     const bgColor = type === 'error' ? 'bg-red-500' : type === 'success' ? 'bg-green-500' : 'bg-blue-500';

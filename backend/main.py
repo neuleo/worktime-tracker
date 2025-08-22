@@ -45,11 +45,8 @@ class WorkSession(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
-    start_time = Column(DateTime)
-    end_time = Column(DateTime, nullable=True)
-    worked_seconds = Column(Integer, default=0)
-    pause_seconds = Column(Integer, default=0)
-    overtime_seconds = Column(Integer, default=0)
+    timestamp = Column(DateTime)  # Changed from start_time/end_time to single timestamp
+    action = Column(String)  # "in" or "out"
     
     user = relationship("User", back_populates="work_sessions")
 
@@ -65,6 +62,12 @@ class StampResponse(BaseModel):
     status: str  # "in" or "out"
     timestamp: str
 
+class BookingEntry(BaseModel):
+    id: int
+    action: str  # "in" or "out"
+    time: str
+    timestamp_iso: str
+
 class DayResponse(BaseModel):
     date: str
     start: Optional[str] = None
@@ -73,7 +76,7 @@ class DayResponse(BaseModel):
     worked: str
     target: str = "07:48"
     overtime: str
-    sessions: List[dict] = []
+    bookings: List[BookingEntry] = []
 
 class WeekResponse(BaseModel):
     week: str
@@ -84,17 +87,15 @@ class WeekResponse(BaseModel):
 class WorkSessionResponse(BaseModel):
     id: int
     date: str
-    start: str
-    end: Optional[str] = None
-    worked: str
-    pause: str
-    overtime: str
+    action: str
+    time: str
+    timestamp_iso: str
 
-class WorkSessionCreate(BaseModel):
+class ManualBookingCreate(BaseModel):
     user: str
     date: str
-    start_time: str
-    end_time: str
+    action: str  # "in" or "out"
+    time: str
 
 class TimeInfoResponse(BaseModel):
     current_time: str
@@ -152,31 +153,51 @@ def time_str_to_seconds(time_str: str) -> int:
     parts = time_str.split(':')
     return int(parts[0]) * 3600 + int(parts[1]) * 60
 
-def calculate_pause_and_overtime(total_seconds: int) -> tuple[int, int]:
+def calculate_daily_stats(bookings: List[WorkSession]) -> tuple[int, int, int]:
     """
-    Calculate pause and overtime according to rules:
-    - Up to 6h: no pause
-    - 6h to 9h: 30min pause minimum
-    - Over 9h: 45min pause minimum
-    - Target work time: 7h48min (28080 seconds)
+    Calculate daily worked time, pause, and overtime from bookings.
+    Returns (worked_seconds, pause_seconds, overtime_seconds)
     """
-    TARGET_SECONDS = 7 * 3600 + 48 * 60  # 7h48min
+    if not bookings:
+        return 0, 0, 0
     
-    # Apply pause rules
-    if total_seconds <= 6 * 3600:  # <= 6h
+    # Sort bookings by timestamp
+    sorted_bookings = sorted(bookings, key=lambda x: x.timestamp)
+    
+    total_presence_seconds = 0
+    current_in_time = None
+    
+    for booking in sorted_bookings:
+        if booking.action == "in":
+            current_in_time = ensure_berlin_tz(booking.timestamp)
+        elif booking.action == "out" and current_in_time:
+            out_time = ensure_berlin_tz(booking.timestamp)
+            presence_duration = int((out_time - current_in_time).total_seconds())
+            total_presence_seconds += presence_duration
+            current_in_time = None
+    
+    # If still clocked in, add current duration
+    if current_in_time:
+        current_time = get_berlin_now()
+        presence_duration = int((current_time - current_in_time).total_seconds())
+        total_presence_seconds += presence_duration
+    
+    # Apply pause rules based on total presence time
+    if total_presence_seconds <= 6 * 3600:  # <= 6h
         pause_seconds = 0
-    elif total_seconds <= 9 * 3600:  # 6h < worked <= 9h
+    elif total_presence_seconds <= 9 * 3600:  # 6h < presence <= 9h
         pause_seconds = 30 * 60  # 30min minimum
     else:  # > 9h
         pause_seconds = 45 * 60  # 45min minimum
     
-    # Calculate actual worked time (total - pause)
-    worked_seconds = total_seconds - pause_seconds
+    # Calculate actual worked time (presence - pause)
+    worked_seconds = total_presence_seconds - pause_seconds
     
-    # Calculate overtime
+    # Calculate overtime (worked time - 7h48min target)
+    TARGET_SECONDS = 7 * 3600 + 48 * 60  # 7h48min
     overtime_seconds = worked_seconds - TARGET_SECONDS
     
-    return pause_seconds, overtime_seconds
+    return worked_seconds, pause_seconds, overtime_seconds
 
 def get_or_create_user(db: Session, username: str) -> User:
     """Get existing user or create new one"""
@@ -188,30 +209,16 @@ def get_or_create_user(db: Session, username: str) -> User:
         db.refresh(user)
     return user
 
-def get_day_sessions(db: Session, user_id: int, date: datetime) -> List[WorkSession]:
-    """Get all sessions for a specific day"""
+def get_day_bookings(db: Session, user_id: int, date: datetime) -> List[WorkSession]:
+    """Get all bookings for a specific day"""
     day_start = datetime.combine(date.date(), time.min).replace(tzinfo=BERLIN_TZ)
     day_end = day_start + timedelta(days=1)
     
     return db.query(WorkSession).filter(
         WorkSession.user_id == user_id,
-        WorkSession.start_time >= day_start,
-        WorkSession.start_time < day_end
-    ).order_by(WorkSession.start_time).all()
-
-def calculate_day_totals(sessions: List[WorkSession]) -> tuple[int, int, int]:
-    """Calculate total worked time, pause, and overtime for a day"""
-    total_worked = 0
-    total_pause = 0
-    total_overtime = 0
-    
-    for session in sessions:
-        if session.end_time:  # Only completed sessions
-            total_worked += session.worked_seconds
-            total_pause += session.pause_seconds
-            total_overtime += session.overtime_seconds
-    
-    return total_worked, total_pause, total_overtime
+        WorkSession.timestamp >= day_start,
+        WorkSession.timestamp < day_end
+    ).order_by(WorkSession.timestamp).all()
 
 # API Routes
 @app.post("/stamp", response_model=StampResponse)
@@ -220,104 +227,105 @@ async def stamp(request: StampRequest, db: Session = Depends(get_db)):
     user = get_or_create_user(db, request.user)
     current_time = get_berlin_now()
     
-    # Check for open session
-    open_session = db.query(WorkSession).filter(
-        WorkSession.user_id == user.id,
-        WorkSession.end_time.is_(None)
-    ).first()
+    # Get last booking to determine current status
+    last_booking = db.query(WorkSession).filter(
+        WorkSession.user_id == user.id
+    ).order_by(desc(WorkSession.timestamp)).first()
     
-    if open_session:
-        # Stamp out - close session
-        open_session.end_time = current_time
+    # Determine new action
+    if not last_booking or last_booking.action == "out":
+        new_action = "in"
+    else:
+        new_action = "out"
+    
+    # Check if stamping out would exceed 10 hours of total presence today
+    if new_action == "out":
+        today_bookings = get_day_bookings(db, user.id, current_time)
         
-        # Calculate total time in seconds
-        total_seconds = int((current_time - ensure_berlin_tz(open_session.start_time)).total_seconds())
+        # Calculate total presence including current session
+        total_presence = 0
+        current_in_time = None
         
-        # Check maximum work time (10h)
-        if total_seconds > 10 * 3600:
+        for booking in today_bookings:
+            if booking.action == "in":
+                current_in_time = ensure_berlin_tz(booking.timestamp)
+            elif booking.action == "out" and current_in_time:
+                out_time = ensure_berlin_tz(booking.timestamp)
+                total_presence += int((out_time - current_in_time).total_seconds())
+                current_in_time = None
+        
+        # Add current session duration
+        if current_in_time:
+            total_presence += int((current_time - current_in_time).total_seconds())
+        
+        if total_presence > 10 * 3600:
             raise HTTPException(
                 status_code=400, 
                 detail="Maximale Arbeitszeit von 10 Stunden überschritten!"
             )
-        
-        # Calculate pause and overtime
-        pause_seconds, overtime_seconds = calculate_pause_and_overtime(total_seconds)
-        
-        # Update session
-        open_session.worked_seconds = total_seconds - pause_seconds
-        open_session.pause_seconds = pause_seconds
-        open_session.overtime_seconds = overtime_seconds
-        
-        db.commit()
-        
-        return StampResponse(
-            status="out",
-            timestamp=current_time.isoformat()
-        )
-    else:
-        # Stamp in - create new session
-        new_session = WorkSession(
-            user_id=user.id,
-            start_time=current_time
-        )
-        db.add(new_session)
-        db.commit()
-        
-        return StampResponse(
-            status="in",
-            timestamp=current_time.isoformat()
-        )
+    
+    # Create new booking
+    new_booking = WorkSession(
+        user_id=user.id,
+        timestamp=current_time,
+        action=new_action
+    )
+    db.add(new_booking)
+    db.commit()
+    
+    return StampResponse(
+        status=new_action,
+        timestamp=current_time.isoformat()
+    )
 
 @app.get("/day/{date}", response_model=DayResponse)
 async def get_day(date: str, user: str = "leon", db: Session = Depends(get_db)):
-    """Get day summary with multiple sessions support"""
+    """Get day summary with bookings"""
     try:
         day_date = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=BERLIN_TZ)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
     
     user_obj = get_or_create_user(db, user)
-    sessions = get_day_sessions(db, user_obj.id, day_date)
+    bookings = get_day_bookings(db, user_obj.id, day_date)
     
-    if not sessions:
+    if not bookings:
         return DayResponse(
             date=date,
             pause="00:00",
             worked="00:00",
             overtime="00:00",
-            sessions=[]
+            bookings=[]
         )
     
-    # Calculate totals from all sessions
-    total_worked, total_pause, total_overtime = calculate_day_totals(sessions)
+    # Calculate daily stats
+    worked_seconds, pause_seconds, overtime_seconds = calculate_daily_stats(bookings)
     
-    # Get first and last session for start/end times
-    first_session = sessions[0]
-    last_session = sessions[-1]
+    # Get first "in" and last "out" for start/end times
+    first_in = next((b for b in bookings if b.action == "in"), None)
+    last_out = next((b for b in reversed(bookings) if b.action == "out"), None)
     
-    start_str = ensure_berlin_tz(first_session.start_time).strftime("%H:%M")
-    end_str = ensure_berlin_tz(last_session.end_time).strftime("%H:%M") if last_session.end_time else None
+    start_str = ensure_berlin_tz(first_in.timestamp).strftime("%H:%M") if first_in else None
+    end_str = ensure_berlin_tz(last_out.timestamp).strftime("%H:%M") if last_out else None
     
-    # Prepare sessions data
-    sessions_data = []
-    for session in sessions:
-        sessions_data.append({
-            "id": session.id,
-            "start": ensure_berlin_tz(session.start_time).strftime("%H:%M"),
-            "end": ensure_berlin_tz(session.end_time).strftime("%H:%M") if session.end_time else None,
-            "worked": seconds_to_time_str(session.worked_seconds),
-            "pause": seconds_to_time_str(session.pause_seconds),
-            "overtime": seconds_to_time_str(session.overtime_seconds)
-        })
+    # Prepare bookings data
+    bookings_data = []
+    for booking in bookings:
+        bookings_data.append(BookingEntry(
+            id=booking.id,
+            action=booking.action,
+            time=ensure_berlin_tz(booking.timestamp).strftime("%H:%M"),
+            timestamp_iso=ensure_berlin_tz(booking.timestamp).isoformat()
+        ))
     
     return DayResponse(
         date=date,
         start=start_str,
         end=end_str,
-        pause=seconds_to_time_str(total_pause),
-        worked=seconds_to_time_str(total_worked),
-        overtime=seconds_to_time_str(total_overtime),
-        sessions=sessions_data
+        pause=seconds_to_time_str(pause_seconds),
+        worked=seconds_to_time_str(worked_seconds),
+        overtime=seconds_to_time_str(overtime_seconds),
+        bookings=bookings_data
     )
 
 @app.get("/week/{year}/{week}", response_model=WeekResponse)
@@ -330,16 +338,18 @@ async def get_week(year: int, week: int, user: str = "leon", db: Session = Depen
     week_start = jan1 + timedelta(weeks=week-1) - timedelta(days=jan1.weekday())
     week_end = week_start + timedelta(days=7)
     
-    # Get sessions for the week
-    sessions = db.query(WorkSession).filter(
-        WorkSession.user_id == user_obj.id,
-        WorkSession.start_time >= week_start,
-        WorkSession.start_time < week_end,
-        WorkSession.end_time.isnot(None)  # Only completed sessions
-    ).all()
+    total_worked = 0
+    total_overtime = 0
     
-    total_worked = sum(s.worked_seconds for s in sessions)
-    total_overtime = sum(s.overtime_seconds for s in sessions)
+    # Calculate for each day in the week
+    for day_offset in range(7):
+        day = week_start + timedelta(days=day_offset)
+        day_bookings = get_day_bookings(db, user_obj.id, day)
+        
+        if day_bookings:
+            worked_seconds, _, overtime_seconds = calculate_daily_stats(day_bookings)
+            total_worked += worked_seconds
+            total_overtime += overtime_seconds
     
     # Target: 7h48min × 5 days = 39h00min
     target_total = 5 * (7 * 3600 + 48 * 60)
@@ -356,14 +366,14 @@ async def get_status(user: str = "leon", db: Session = Depends(get_db)):
     """Get current status (in/out)"""
     user_obj = get_or_create_user(db, user)
     
-    open_session = db.query(WorkSession).filter(
-        WorkSession.user_id == user_obj.id,
-        WorkSession.end_time.is_(None)
-    ).first()
+    # Get last booking
+    last_booking = db.query(WorkSession).filter(
+        WorkSession.user_id == user_obj.id
+    ).order_by(desc(WorkSession.timestamp)).first()
     
-    if open_session:
+    if last_booking and last_booking.action == "in":
         current_time = get_berlin_now()
-        start_time = ensure_berlin_tz(open_session.start_time)
+        start_time = ensure_berlin_tz(last_booking.timestamp)
         duration_seconds = int((current_time - start_time).total_seconds())
         
         return {
@@ -376,94 +386,101 @@ async def get_status(user: str = "leon", db: Session = Depends(get_db)):
         return {"status": "out"}
 
 @app.get("/sessions", response_model=List[WorkSessionResponse])
-async def get_all_sessions(user: str = "leon", limit: int = 50, db: Session = Depends(get_db)):
-    """Get all work sessions for a user"""
+async def get_all_sessions(user: str = "leon", limit: int = 100, db: Session = Depends(get_db)):
+    """Get all bookings for a user"""
     user_obj = get_or_create_user(db, user)
     
-    sessions = db.query(WorkSession).filter(
+    bookings = db.query(WorkSession).filter(
         WorkSession.user_id == user_obj.id
-    ).order_by(desc(WorkSession.start_time)).limit(limit).all()
+    ).order_by(desc(WorkSession.timestamp)).limit(limit).all()
     
     result = []
-    for session in sessions:
-        start_time = ensure_berlin_tz(session.start_time)
+    for booking in bookings:
+        timestamp = ensure_berlin_tz(booking.timestamp)
         result.append(WorkSessionResponse(
-            id=session.id,
-            date=start_time.strftime("%Y-%m-%d"),
-            start=start_time.strftime("%H:%M"),
-            end=ensure_berlin_tz(session.end_time).strftime("%H:%M") if session.end_time else None,
-            worked=seconds_to_time_str(session.worked_seconds),
-            pause=seconds_to_time_str(session.pause_seconds),
-            overtime=seconds_to_time_str(session.overtime_seconds)
+            id=booking.id,
+            date=timestamp.strftime("%Y-%m-%d"),
+            action=booking.action,
+            time=timestamp.strftime("%H:%M"),
+            timestamp_iso=timestamp.isoformat()
         ))
     
     return result
 
 @app.delete("/sessions/{session_id}")
 async def delete_session(session_id: int, user: str = "leon", db: Session = Depends(get_db)):
-    """Delete a work session"""
+    """Delete a booking"""
     user_obj = get_or_create_user(db, user)
     
-    session = db.query(WorkSession).filter(
+    booking = db.query(WorkSession).filter(
         WorkSession.id == session_id,
         WorkSession.user_id == user_obj.id
     ).first()
     
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
     
-    db.delete(session)
+    db.delete(booking)
     db.commit()
     
-    return {"message": "Session deleted successfully"}
+    return {"message": "Booking deleted successfully"}
 
 @app.post("/sessions")
-async def create_session(session_data: WorkSessionCreate, db: Session = Depends(get_db)):
-    """Create a work session manually"""
-    user_obj = get_or_create_user(db, session_data.user)
+async def create_manual_booking(booking_data: ManualBookingCreate, db: Session = Depends(get_db)):
+    """Create a manual booking"""
+    user_obj = get_or_create_user(db, booking_data.user)
     
     try:
-        # Parse date and times
-        date_obj = datetime.strptime(session_data.date, "%Y-%m-%d").date()
-        start_time = datetime.strptime(session_data.start_time, "%H:%M").time()
-        end_time = datetime.strptime(session_data.end_time, "%H:%M").time()
+        # Parse date and time
+        date_obj = datetime.strptime(booking_data.date, "%Y-%m-%d").date()
+        time_obj = datetime.strptime(booking_data.time, "%H:%M").time()
         
-        # Create datetime objects in Berlin timezone
-        start_dt = datetime.combine(date_obj, start_time).replace(tzinfo=BERLIN_TZ)
-        end_dt = datetime.combine(date_obj, end_time).replace(tzinfo=BERLIN_TZ)
+        # Create datetime object in Berlin timezone
+        booking_time = datetime.combine(date_obj, time_obj).replace(tzinfo=BERLIN_TZ)
         
-        # Handle overnight sessions
-        if end_time < start_time:
-            end_dt += timedelta(days=1)
+        # Validate booking doesn't exceed 10 hours for the day
+        day_bookings = get_day_bookings(db, user_obj.id, booking_time)
         
-        # Calculate duration
-        total_seconds = int((end_dt - start_dt).total_seconds())
-        
-        if total_seconds <= 0:
-            raise HTTPException(status_code=400, detail="End time must be after start time")
-        
-        if total_seconds > 10 * 3600:
-            raise HTTPException(status_code=400, detail="Session cannot exceed 10 hours")
-        
-        # Calculate pause and overtime
-        pause_seconds, overtime_seconds = calculate_pause_and_overtime(total_seconds)
-        worked_seconds = total_seconds - pause_seconds
-        
-        # Create new session
-        new_session = WorkSession(
+        # Simulate the new booking to check total presence
+        test_bookings = day_bookings.copy()
+        test_booking = WorkSession(
             user_id=user_obj.id,
-            start_time=start_dt,
-            end_time=end_dt,
-            worked_seconds=worked_seconds,
-            pause_seconds=pause_seconds,
-            overtime_seconds=overtime_seconds
+            timestamp=booking_time,
+            action=booking_data.action
+        )
+        test_bookings.append(test_booking)
+        
+        # Check total presence wouldn't exceed 10 hours
+        sorted_bookings = sorted(test_bookings, key=lambda x: x.timestamp)
+        total_presence = 0
+        current_in_time = None
+        
+        for b in sorted_bookings:
+            if b.action == "in":
+                current_in_time = ensure_berlin_tz(b.timestamp)
+            elif b.action == "out" and current_in_time:
+                out_time = ensure_berlin_tz(b.timestamp)
+                total_presence += int((out_time - current_in_time).total_seconds())
+                current_in_time = None
+        
+        if total_presence > 10 * 3600:
+            raise HTTPException(
+                status_code=400, 
+                detail="Buchung würde die maximale Arbeitszeit von 10 Stunden überschreiten!"
+            )
+        
+        # Create new booking
+        new_booking = WorkSession(
+            user_id=user_obj.id,
+            timestamp=booking_time,
+            action=booking_data.action
         )
         
-        db.add(new_session)
+        db.add(new_booking)
         db.commit()
-        db.refresh(new_session)
+        db.refresh(new_booking)
         
-        return {"message": "Session created successfully", "id": new_session.id}
+        return {"message": "Booking created successfully", "id": new_booking.id}
         
     except ValueError as e:
         raise HTTPException(status_code=400, detail="Invalid time format")
@@ -473,81 +490,90 @@ async def get_time_info(user: str = "leon", db: Session = Depends(get_db)):
     """Get working time information for today"""
     user_obj = get_or_create_user(db, user)
     current_time = get_berlin_now()
-    today = current_time.date()
     
-    # Get today's sessions
-    sessions = get_day_sessions(db, user_obj.id, current_time)
+    # Get today's bookings
+    today_bookings = get_day_bookings(db, user_obj.id, current_time)
     
-    # Check if currently stamped in
-    open_session = None
-    current_session_duration = 0
-    
-    for session in sessions:
-        if session.end_time is None:
-            open_session = session
-            current_session_duration = int((current_time - ensure_berlin_tz(session.start_time)).total_seconds())
-            break
-    
-    # Calculate worked time so far today
-    completed_worked, _, _ = calculate_day_totals([s for s in sessions if s.end_time])
-    
-    if open_session:
-        # Add current session time (with pause consideration)
-        pause_seconds, _ = calculate_pause_and_overtime(current_session_duration)
-        current_worked = current_session_duration - pause_seconds
-        total_worked_today = completed_worked + current_worked
-    else:
-        total_worked_today = completed_worked
+    # Calculate current stats
+    worked_seconds, pause_seconds, overtime_seconds = calculate_daily_stats(today_bookings)
     
     # Target: 7h48min
     target_seconds = 7 * 3600 + 48 * 60
-    remaining_seconds = target_seconds - total_worked_today
+    remaining_seconds = max(0, target_seconds - worked_seconds)
     
-    # Calculate time estimates if currently working
+    # Calculate total presence time for milestone calculations
+    total_presence_seconds = 0
+    current_in_time = None
+    
+    # Get current status
+    last_booking = next((b for b in reversed(today_bookings) if b.action in ["in", "out"]), None) if today_bookings else None
+    is_currently_in = last_booking and last_booking.action == "in"
+    
+    if today_bookings:
+        for booking in sorted(today_bookings, key=lambda x: x.timestamp):
+            if booking.action == "in":
+                current_in_time = ensure_berlin_tz(booking.timestamp)
+            elif booking.action == "out" and current_in_time:
+                out_time = ensure_berlin_tz(booking.timestamp)
+                total_presence_seconds += int((out_time - current_in_time).total_seconds())
+                current_in_time = None
+        
+        # If currently stamped in, add current session duration
+        if current_in_time:
+            total_presence_seconds += int((current_time - current_in_time).total_seconds())
+    
+    # Calculate milestone times (only if currently stamped in)
     time_to_6h = None
     time_to_9h = None
     time_to_10h = None
     estimated_end_time = None
     
-    if open_session:
-        start_time = ensure_berlin_tz(open_session.start_time)
-        
-        # Time to reach 6 hours total presence
-        if current_session_duration < 6 * 3600:
-            time_to_6h_seconds = 6 * 3600 - current_session_duration
+    if is_currently_in and current_in_time:
+        # Time to reach presence milestones
+        if total_presence_seconds < 6 * 3600:
+            time_to_6h_seconds = 6 * 3600 - total_presence_seconds
             time_to_6h_time = current_time + timedelta(seconds=time_to_6h_seconds)
             time_to_6h = time_to_6h_time.strftime("%H:%M")
         
-        # Time to reach 9 hours total presence
-        if current_session_duration < 9 * 3600:
-            time_to_9h_seconds = 9 * 3600 - current_session_duration
+        if total_presence_seconds < 9 * 3600:
+            time_to_9h_seconds = 9 * 3600 - total_presence_seconds
             time_to_9h_time = current_time + timedelta(seconds=time_to_9h_seconds)
             time_to_9h = time_to_9h_time.strftime("%H:%M")
         
-        # Time to reach 10 hours total presence
-        if current_session_duration < 10 * 3600:
-            time_to_10h_seconds = 10 * 3600 - current_session_duration
+        if total_presence_seconds < 10 * 3600:
+            time_to_10h_seconds = 10 * 3600 - total_presence_seconds
             time_to_10h_time = current_time + timedelta(seconds=time_to_10h_seconds)
             time_to_10h = time_to_10h_time.strftime("%H:%M")
         
-        # Estimated end time to reach 7h48min worked time
+        # Estimated end time to reach target work hours
         if remaining_seconds > 0:
-            # Need to account for pause rules
-            # Estimate additional presence time needed
-            if current_session_duration + remaining_seconds <= 6 * 3600:
-                additional_presence = remaining_seconds
-            elif current_session_duration + remaining_seconds <= 9 * 3600:
-                additional_presence = remaining_seconds + (30 * 60 - pause_seconds)
-            else:
-                additional_presence = remaining_seconds + (45 * 60 - pause_seconds)
+            # Calculate how much more presence time is needed
+            current_worked_in_session = worked_seconds
+            needed_work = remaining_seconds
             
-            estimated_end = current_time + timedelta(seconds=max(0, additional_presence))
+            # Estimate additional presence time considering pause rules
+            future_total_presence = total_presence_seconds + needed_work
+            
+            if future_total_presence <= 6 * 3600:
+                additional_presence = needed_work
+            elif future_total_presence <= 9 * 3600:
+                # Need 30min pause total, subtract what we already have
+                required_pause = 30 * 60
+                additional_pause_needed = max(0, required_pause - pause_seconds)
+                additional_presence = needed_work + additional_pause_needed
+            else:
+                # Need 45min pause total, subtract what we already have
+                required_pause = 45 * 60
+                additional_pause_needed = max(0, required_pause - pause_seconds)
+                additional_presence = needed_work + additional_pause_needed
+            
+            estimated_end = current_time + timedelta(seconds=additional_presence)
             estimated_end_time = estimated_end.strftime("%H:%M")
     
     return TimeInfoResponse(
         current_time=current_time.strftime("%H:%M"),
-        time_worked_today=seconds_to_time_str(total_worked_today),
-        time_remaining=seconds_to_time_str(max(0, remaining_seconds)),
+        time_worked_today=seconds_to_time_str(worked_seconds),
+        time_remaining=seconds_to_time_str(remaining_seconds),
         time_to_6h=time_to_6h,
         time_to_9h=time_to_9h,
         time_to_10h=time_to_10h,

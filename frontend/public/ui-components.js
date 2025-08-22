@@ -123,6 +123,26 @@ function renderTodayTab(dayData) {
                     </span>
                 </div>
             </div>
+
+            <!-- Today's Bookings -->
+            ${dayData.bookings && dayData.bookings.length > 0 ? `
+                <div class="border-t pt-4">
+                    <h4 class="font-medium text-gray-700 mb-3">Heutige Buchungen:</h4>
+                    <div class="space-y-2">
+                        ${dayData.bookings.map(booking => `
+                            <div class="flex items-center justify-between py-2 px-3 bg-gray-50 rounded-lg">
+                                <div class="flex items-center space-x-3">
+                                    <div class="w-2 h-2 rounded-full ${booking.action === 'in' ? 'bg-green-500' : 'bg-red-500'}"></div>
+                                    <span class="text-sm font-medium">
+                                        ${booking.action === 'in' ? 'Gekommen' : 'Gegangen'}
+                                    </span>
+                                    <span class="font-mono text-sm">${booking.time}</span>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            ` : ''}
         </div>
     `;
 }
@@ -192,11 +212,11 @@ function renderSessions() {
             <div class="bg-white rounded-xl shadow-sm border">
                 <div class="p-6 border-b">
                     <h2 class="text-lg font-bold text-gray-900">Alle Buchungen</h2>
-                    <p class="text-sm text-gray-600 mt-1">Übersicht aller Arbeitssessions</p>
+                    <p class="text-sm text-gray-600 mt-1">Übersicht aller Buchungen</p>
                 </div>
                 
                 <div class="max-h-96 overflow-y-auto scrollbar-hide">
-                    ${sortedDates.length === 0 ? renderEmptySessionsState() : sortedDates.map(renderSessionsByDate).join('')}
+                    ${sortedDates.length === 0 ? renderEmptySessionsState() : sortedDates.map(renderBookingsByDate).join('')}
                 </div>
             </div>
         </div>
@@ -212,10 +232,10 @@ function renderEmptySessionsState() {
     `;
 }
 
-function renderSessionsByDate(date) {
+function renderBookingsByDate(date) {
     const { sessions } = appState;
     const groupedSessions = groupSessionsByDate(sessions);
-    const daySessions = groupedSessions[date];
+    const dayBookings = groupedSessions[date];
     const dateObj = new Date(date + 'T12:00:00');
     const formattedDate = dateObj.toLocaleDateString('de-DE', {
         weekday: 'long',
@@ -223,41 +243,48 @@ function renderSessionsByDate(date) {
         month: 'long',
         day: 'numeric'
     });
+
+    // Calculate daily overtime for this date
+    const dayOvertimeData = calculateDayOvertimeFromBookings(dayBookings);
     
     return `
         <div class="border-b last:border-b-0">
-            <div class="p-4 bg-gray-50">
+            <div class="p-4 bg-gray-50 flex justify-between items-center">
                 <h3 class="font-semibold text-gray-900">${formattedDate}</h3>
+                <div class="text-sm">
+                    <span class="text-gray-600">Überstunden: </span>
+                    <span class="font-mono ${getOvertimeColor(dayOvertimeData.overtime)}">
+                        ${formatDuration(dayOvertimeData.overtime)}
+                    </span>
+                </div>
             </div>
             <div class="divide-y">
-                ${daySessions.map(renderSessionItem).join('')}
+                ${dayBookings.map(renderBookingItem).join('')}
             </div>
         </div>
     `;
 }
 
-function renderSessionItem(session) {
+function renderBookingItem(booking) {
+    const actionText = booking.action === 'in' ? 'Gekommen' : 'Gegangen';
+    const actionColor = booking.action === 'in' ? 'text-green-600' : 'text-red-600';
+    const dotColor = booking.action === 'in' ? 'bg-green-500' : 'bg-red-500';
+    
     return `
         <div class="p-4 hover:bg-gray-50 transition-colors">
-            <div class="flex justify-between items-start">
-                <div class="space-y-1">
-                    <div class="flex items-center space-x-3">
-                        <span class="font-mono text-sm font-medium">
-                            ${session.start} - ${session.end || 'Offen'}
-                        </span>
-                        ${!session.end ? '<span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">Aktiv</span>' : ''}
-                    </div>
-                    <div class="text-sm text-gray-600 space-x-4">
-                        <span>Gearbeitet: ${session.worked}</span>
-                        <span>Pause: ${session.pause}</span>
-                        <span class="${getOvertimeColor(session.overtime)}">
-                            Überstunden: ${formatDuration(session.overtime)}
-                        </span>
+            <div class="flex justify-between items-center">
+                <div class="flex items-center space-x-3">
+                    <div class="w-3 h-3 rounded-full ${dotColor}"></div>
+                    <div class="space-y-1">
+                        <div class="flex items-center space-x-3">
+                            <span class="font-medium ${actionColor}">${actionText}</span>
+                            <span class="font-mono text-lg font-bold">${booking.time}</span>
+                        </div>
                     </div>
                 </div>
                 <button 
-                    onclick="deleteSession(${session.id})"
-                    class="p-1 text-red-500 hover:bg-red-50 rounded transition-colors"
+                    onclick="deleteSession(${booking.id})"
+                    class="p-2 text-red-500 hover:bg-red-50 rounded transition-colors"
                     title="Buchung löschen"
                 >
                     ${createIcon('trash', 'h-4 w-4')}
@@ -335,7 +362,7 @@ function renderEstimatedEndTime(estimatedEndTime) {
 function renderTimeInfoMilestones(timeInfo) {
     return `
         <div class="space-y-3">
-            <h3 class="font-semibold text-gray-900">Wichtige Zeiten erreicht um:</h3>
+            <h3 class="font-semibold text-gray-900">Anwesenheitszeit erreicht um:</h3>
             
             ${renderMilestone('6 Stunden Anwesenheit', timeInfo.time_to_6h, 'yellow')}
             ${renderMilestone('9 Stunden Anwesenheit', timeInfo.time_to_9h, 'orange')}
@@ -371,15 +398,17 @@ function renderPauseRulesInfo() {
 }
 
 function renderManualBooking() {
+    const today = new Date().toISOString().split('T')[0];
+    
     return `
         <div class="space-y-6">
             <div class="bg-white rounded-xl shadow-sm border">
                 <div class="p-6 border-b">
                     <h2 class="text-lg font-bold text-gray-900">Manuelle Buchung</h2>
-                    <p class="text-sm text-gray-600 mt-1">Arbeitszeit nachträglich eintragen</p>
+                    <p class="text-sm text-gray-600 mt-1">Einzelne Buchung nachträglich eintragen</p>
                 </div>
                 
-                ${renderManualBookingForm()}
+                ${renderManualBookingForm(today)}
             </div>
 
             ${renderManualBookingInfo()}
@@ -387,7 +416,7 @@ function renderManualBooking() {
     `;
 }
 
-function renderManualBookingForm() {
+function renderManualBookingForm(today) {
     return `
         <form onsubmit="handleManualSubmit(event)" class="p-6 space-y-4">
             <div>
@@ -397,33 +426,34 @@ function renderManualBookingForm() {
                 <input 
                     type="date" 
                     id="manual-date" 
+                    value="${today}"
                     class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    max="${new Date().toISOString().split('T')[0]}"
+                    max="${today}"
                 >
             </div>
 
-            <div class="grid grid-cols-2 gap-4">
-                <div>
-                    <label for="manual-start" class="block text-sm font-medium text-gray-700 mb-2">
-                        Startzeit
-                    </label>
-                    <input 
-                        type="time" 
-                        id="manual-start" 
-                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    >
-                </div>
+            <div>
+                <label for="manual-action" class="block text-sm font-medium text-gray-700 mb-2">
+                    Buchungstyp
+                </label>
+                <select 
+                    id="manual-action" 
+                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                    <option value="in">Kommen (Einstempeln)</option>
+                    <option value="out">Gehen (Ausstempeln)</option>
+                </select>
+            </div>
 
-                <div>
-                    <label for="manual-end" class="block text-sm font-medium text-gray-700 mb-2">
-                        Endzeit
-                    </label>
-                    <input 
-                        type="time" 
-                        id="manual-end" 
-                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    >
-                </div>
+            <div>
+                <label for="manual-time" class="block text-sm font-medium text-gray-700 mb-2">
+                    Uhrzeit
+                </label>
+                <input 
+                    type="time" 
+                    id="manual-time" 
+                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
             </div>
 
             <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
@@ -434,8 +464,8 @@ function renderManualBookingForm() {
                     <div class="text-sm">
                         <div class="font-medium text-yellow-900 mb-1">Hinweis</div>
                         <div class="text-yellow-800">
+                            Einzelne Buchung für Kommen oder Gehen. 
                             Pausen werden automatisch nach den gesetzlichen Regelungen berechnet.
-                            Maximum: 10 Stunden pro Tag.
                         </div>
                     </div>
                 </div>
@@ -456,10 +486,11 @@ function renderManualBookingInfo() {
         <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <h4 class="font-medium text-blue-900 mb-2">Automatische Pausenberechnung:</h4>
             <ul class="text-sm text-blue-800 space-y-1">
-                <li>• Bis 6h: Keine Pause</li>
-                <li>• 6h bis 9h: 30min Pause</li>
-                <li>• Über 9h: 45min Pause</li>
+                <li>• Bis 6h Anwesenheit: Keine Pause</li>
+                <li>• 6h bis 9h Anwesenheit: 30min Pause</li>
+                <li>• Über 9h Anwesenheit: 45min Pause</li>
                 <li>• Zielarbeitszeit: 7h 48min pro Tag</li>
+                <li>• Maximum: 10h Anwesenheit pro Tag</li>
             </ul>
         </div>
     `;
