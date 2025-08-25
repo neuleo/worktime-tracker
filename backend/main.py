@@ -185,13 +185,9 @@ def calculate_daily_stats(bookings: List[WorkSession]) -> tuple[int, int, int]:
     NINE_HOURS = 9 * 3600
 
     if total_presence_seconds > NINE_HOURS:
-        pause_seconds = 30 * 60
-        time_over_9_hours = total_presence_seconds - NINE_HOURS
-        additional_pause = min(time_over_9_hours, 15 * 60)
-        pause_seconds += additional_pause
+        pause_seconds = 45 * 60
     elif total_presence_seconds > SIX_HOURS:
-        time_over_6_hours = total_presence_seconds - SIX_HOURS
-        pause_seconds = min(time_over_6_hours, 30 * 60)
+        pause_seconds = 30 * 60
     
     worked_seconds = total_presence_seconds - pause_seconds
     

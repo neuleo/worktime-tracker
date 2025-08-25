@@ -132,12 +132,9 @@ function calculateDailyStatsJS(bookings) {
     const NINE_HOURS = 9 * 3600;
 
     if (totalPresenceSeconds > NINE_HOURS) {
-        pauseSeconds = 30 * 60;
-        const timeOver9 = totalPresenceSeconds - NINE_HOURS;
-        pauseSeconds += Math.min(timeOver9, 15 * 60);
+        pauseSeconds = 45 * 60;
     } else if (totalPresenceSeconds > SIX_HOURS) {
-        const timeOver6 = totalPresenceSeconds - SIX_HOURS;
-        pauseSeconds = Math.min(timeOver6, 30 * 60);
+        pauseSeconds = 30 * 60;
     }
     
     const workedSeconds = totalPresenceSeconds - pauseSeconds;
