@@ -52,50 +52,6 @@ function groupSessionsByDate(sessions) {
     return grouped;
 }
 
-function calculateDayOvertimeFromBookings(bookings) {
-    if (!bookings || bookings.length === 0) {
-        return { worked: '00:00', pause: '00:00', overtime: '00:00' };
-    }
-
-    // Sort bookings by time
-    const sortedBookings = bookings.sort((a, b) => a.time.localeCompare(b.time));
-    
-    let totalPresenceSeconds = 0;
-    let currentInTime = null;
-    
-    for (const booking of sortedBookings) {
-        const [hours, minutes] = booking.time.split(':').map(Number);
-        const timeInSeconds = hours * 3600 + minutes * 60;
-        
-        if (booking.action === 'in') {
-            currentInTime = timeInSeconds;
-        } else if (booking.action === 'out' && currentInTime !== null) {
-            totalPresenceSeconds += timeInSeconds - currentInTime;
-            currentInTime = null;
-        }
-    }
-    
-    // Apply pause rules
-    let pauseSeconds = 0;
-    if (totalPresenceSeconds <= 6 * 3600) {
-        pauseSeconds = 0;
-    } else if (totalPresenceSeconds <= 9 * 3600) {
-        pauseSeconds = 30 * 60; // 30min
-    } else {
-        pauseSeconds = 45 * 60; // 45min
-    }
-    
-    const workedSeconds = totalPresenceSeconds - pauseSeconds;
-    const targetSeconds = 7 * 3600 + 48 * 60; // 7h48min
-    const overtimeSeconds = workedSeconds - targetSeconds;
-    
-    return {
-        worked: secondsToTimeStr(workedSeconds),
-        pause: secondsToTimeStr(pauseSeconds),
-        overtime: secondsToTimeStr(overtimeSeconds)
-    };
-}
-
 function secondsToTimeStr(seconds) {
     const isNegative = seconds < 0;
     const absSeconds = Math.abs(seconds);
@@ -107,47 +63,66 @@ function secondsToTimeStr(seconds) {
 
 function calculateDailyStatsJS(bookings) {
     if (!bookings || bookings.length === 0) {
-        return { worked: '00:00', pause: '00:00', overtime: '00:00' };
+        return { worked: '00:00', pause: '00:00', overtime: '00:00', netSeconds: 0, pauseSeconds: 0, overtimeSeconds: 0 };
     }
 
     const sortedBookings = bookings.sort((a, b) => a.time.localeCompare(b.time));
-    
-    let totalPresenceSeconds = 0;
-    let currentInTime = null;
-    
-    for (const booking of sortedBookings) {
-        const timeParts = booking.time.split(':').map(Number);
-        const timeInSeconds = (timeParts[0] * 3600) + (timeParts[1] * 60);
-        
-        if (booking.action === 'in') {
-            currentInTime = timeInSeconds;
-        } else if (booking.action === 'out' && currentInTime !== null) {
-            totalPresenceSeconds += timeInSeconds - currentInTime;
-            currentInTime = null;
+
+    const timeToSeconds = (timeStr) => {
+        const [hours, minutes] = timeStr.split(':').map(Number);
+        return (hours * 3600) + (minutes * 60);
+    };
+
+    const firstStampSeconds = timeToSeconds(sortedBookings[0].time);
+    const lastStampSeconds = timeToSeconds(sortedBookings[sortedBookings.length - 1].time);
+
+    const gross_session_seconds = lastStampSeconds - firstStampSeconds;
+
+    let manual_pause_seconds = 0;
+    for (let i = 0; i < sortedBookings.length - 1; i++) {
+        if (sortedBookings[i].action === 'out' && sortedBookings[i+1].action === 'in') {
+            const pause_start = timeToSeconds(sortedBookings[i].time);
+            const pause_end = timeToSeconds(sortedBookings[i+1].time);
+            manual_pause_seconds += (pause_end - pause_start);
         }
     }
-    
-    let pauseSeconds = 0;
-    const SIX_HOURS = 6 * 3600;
-    const NINE_HOURS = 9 * 3600;
 
-    if (totalPresenceSeconds > NINE_HOURS) {
-        pauseSeconds = 45 * 60;
-    } else if (totalPresenceSeconds > SIX_HOURS) {
-        pauseSeconds = 30 * 60;
+    // --- New Pause Calculation Logic ---
+    const gross_session_minutes = gross_session_seconds / 60;
+    let statutory_break_minutes = 0;
+
+    if (gross_session_minutes <= 360) { // <= 6h
+        statutory_break_minutes = 0;
+    } else if (gross_session_minutes > 360 && gross_session_minutes <= 390) { // > 6h and <= 6h 30m
+        statutory_break_minutes = gross_session_minutes - 360;
+    } else if (gross_session_minutes > 390 && gross_session_minutes <= 540) { // > 6h 30m and <= 9h
+        statutory_break_minutes = 30;
+    } else if (gross_session_minutes > 540 && gross_session_minutes <= 555) { // > 9h and <= 9h 15m
+        statutory_break_minutes = 30 + (gross_session_minutes - 540);
+    } else { // > 9h 15m
+        statutory_break_minutes = 45;
     }
+
+    const statutory_break_seconds = Math.floor(statutory_break_minutes * 60);
+    const total_deducted_pause_seconds = Math.max(manual_pause_seconds, statutory_break_seconds);
     
-    const workedSeconds = totalPresenceSeconds - pauseSeconds;
-    const TEN_HOURS = 10 * 3600;
-    const cappedWorkedSeconds = Math.min(workedSeconds, TEN_HOURS);
-    
-    const TARGET_SECONDS = 7 * 3600 + 48 * 60;
-    const overtimeSeconds = cappedWorkedSeconds - TARGET_SECONDS;
-    
+    let net_work_seconds = gross_session_seconds - total_deducted_pause_seconds;
+    net_work_seconds = Math.max(0, net_work_seconds);
+
+    // Cap worked time at 10 hours
+    const TEN_HOURS_SECONDS = 10 * 3600;
+    const capped_net_worked_seconds = Math.min(net_work_seconds, TEN_HOURS_SECONDS);
+
+    const TARGET_SECONDS = 7 * 3600 + 48 * 60; // 7h 48m
+    const overtime_seconds = capped_net_worked_seconds - TARGET_SECONDS;
+
     return {
-        worked: secondsToTimeStr(cappedWorkedSeconds),
-        pause: secondsToTimeStr(pauseSeconds),
-        overtime: secondsToTimeStr(overtimeSeconds)
+        worked: secondsToTimeStr(capped_net_worked_seconds),
+        pause: secondsToTimeStr(total_deducted_pause_seconds),
+        overtime: secondsToTimeStr(overtime_seconds),
+        netSeconds: capped_net_worked_seconds,
+        pauseSeconds: total_deducted_pause_seconds,
+        overtimeSeconds: overtime_seconds
     };
 }
 
@@ -180,8 +155,7 @@ function createIcon(name, className = 'h-6 w-6') {
         trending: `<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>`,
         menu: `<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>`,
         wifi: `<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path></svg>`,
-        wifioff: `<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636L5.636 18.364m8.485-8.485L9.88 14.12M12 20h.01"></path></svg>`,
-        trash: `<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>`,
+        wifioff: `<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 trapper" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>`,
         gleitzeit: `<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 11l5-5m0 0l5 5m-5-5v12"></path></svg>`,
         settings: `<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>`
     };

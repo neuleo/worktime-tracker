@@ -245,7 +245,7 @@ function renderBookingsByDate(date) {
     });
 
     // Calculate daily overtime for this date
-    const dayOvertimeData = calculateDayOvertimeFromBookings(dayBookings);
+    const dayOvertimeData = calculateDailyStatsJS(dayBookings);
     
     return `
         <div class="border-b last:border-b-0">
@@ -295,7 +295,7 @@ function renderBookingItem(booking) {
 }
 
 function renderTimeInfo() {
-    const { timeInfo } = appState;
+    const { timeInfo, plannedDepartureTime } = appState;
     
     if (!timeInfo) {
         return renderLoadingState();
@@ -322,10 +322,15 @@ function renderTimeInfo() {
                             <input 
                                 type="time" 
                                 id="planned-departure" 
-                                onchange="handlePlannedDepartureChange(event)"
+                                value="${plannedDepartureTime || ''}"
+                                oninput="handlePlannedDepartureChange(event)"
+                                onfocus="pauseTimeInfoUpdates()"
+                                onblur="setupTimeInfoLiveUpdates()"
                                 class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                             >
-                            <div id="what-if-result"></div>
+                            <div id="what-if-result">
+                                ${renderWhatIfResult(plannedDepartureTime)}
+                            </div>
                         </div>
                     </div>
 
@@ -333,6 +338,28 @@ function renderTimeInfo() {
                     ${renderPauseRulesInfo()}
                 </div>
             </div>
+        </div>
+    `;
+}
+
+function renderWhatIfResult(plannedTime) {
+    if (!plannedTime || !appState.dayData || !appState.dayData.bookings) {
+        return '';
+    }
+
+    // Deep copy today's bookings to avoid modifying the state directly
+    let tempBookings = JSON.parse(JSON.stringify(appState.dayData.bookings));
+
+    // Add the planned departure as a temporary 'out' booking
+    tempBookings.push({ action: 'out', time: plannedTime });
+
+    const stats = calculateDailyStatsJS(tempBookings);
+    const overtimeColor = getOvertimeColor(stats.overtime);
+
+    return `
+        <div class="text-center mt-4 p-4 bg-gray-50 rounded-lg">
+            <p class="text-sm text-gray-600">Errechnete Überstunden:</p>
+            <p class="font-mono text-2xl font-bold ${overtimeColor}">${formatDuration(stats.overtime)}</p>
         </div>
     `;
 }

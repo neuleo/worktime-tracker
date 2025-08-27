@@ -156,49 +156,94 @@ def seconds_to_time_str(seconds: int) -> str:
     minutes = (seconds % 3600) // 60
     return f"{hours:02d}:{minutes:02d}"
 
-def calculate_daily_stats(bookings: List[WorkSession]) -> tuple[int, int, int]:
+
+def _calculate_net_work_time_and_pause(gross_session_seconds: int, manual_pause_seconds: int) -> tuple[int, int]:
+    """
+    Calculates the net work time and the total deducted pause based on German law.
+
+    Args:
+        gross_session_seconds: The total time from the first 'in' to the last 'out' stamp in seconds.
+        manual_pause_seconds: The total time the user was stamped 'out' for breaks in seconds.
+
+    Returns:
+        A tuple containing (net_work_seconds, total_deducted_pause_seconds).
+    """
+    # All times in minutes for easier calculation based on rules
+    gross_session_minutes = gross_session_seconds / 60
+
+    statutory_break_minutes = 0
+    if gross_session_minutes <= 360:  # <= 6h
+        statutory_break_minutes = 0
+    elif 360 < gross_session_minutes <= 390:  # > 6h and <= 6h 30m
+        statutory_break_minutes = gross_session_minutes - 360
+    elif 390 < gross_session_minutes <= 540:  # > 6h 30m and <= 9h
+        statutory_break_minutes = 30
+    elif 540 < gross_session_minutes <= 555:  # > 9h and <= 9h 15m
+        statutory_break_minutes = 30 + (gross_session_minutes - 540)
+    else:  # > 9h 15m
+        statutory_break_minutes = 45
+
+    statutory_break_seconds = int(statutory_break_minutes * 60)
+
+    total_deducted_pause_seconds = max(manual_pause_seconds, statutory_break_seconds)
+    net_work_seconds = gross_session_seconds - total_deducted_pause_seconds
+
+    # The net work time cannot be negative.
+    net_work_seconds = max(0, net_work_seconds)
+
+    return int(net_work_seconds), int(total_deducted_pause_seconds)
+
+
+def _calculate_statutory_break_for_prediction(gross_session_seconds: int) -> int:
+    """Calculates the statutory break in seconds based on a given gross session time."""
+    gross_session_minutes = gross_session_seconds / 60
+    statutory_break_minutes = 0
+    if gross_session_minutes <= 360:
+        statutory_break_minutes = 0
+    elif 360 < gross_session_minutes <= 390:
+        statutory_break_minutes = gross_session_minutes - 360
+    elif 390 < gross_session_minutes <= 540:
+        statutory_break_minutes = 30
+    elif 540 < gross_session_minutes <= 555:
+        statutory_break_minutes = 30 + (gross_session_minutes - 540)
+    else:
+        statutory_break_minutes = 45
+    return int(statutory_break_minutes * 60)
+
+
+def calculate_daily_stats(bookings: List[WorkSession], is_ongoing_day: bool) -> tuple[int, int, int]:
     if not bookings:
         return 0, 0, 0
-    
+
     sorted_bookings = sorted(bookings, key=lambda x: x.timestamp)
-    
-    total_presence_seconds = 0
-    current_in_time = None
-    
-    for booking in sorted_bookings:
-        if booking.action == "in":
-            current_in_time = ensure_berlin_tz(booking.timestamp)
-        elif booking.action == "out" and current_in_time:
-            out_time = ensure_berlin_tz(booking.timestamp)
-            presence_duration = int((out_time - current_in_time).total_seconds())
-            total_presence_seconds += presence_duration
-            current_in_time = None
-    
-    if current_in_time:
-        now = get_berlin_now()
-        if now.date() == current_in_time.date():
-            presence_duration = int((now - current_in_time).total_seconds())
-            total_presence_seconds += presence_duration
+    first_stamp = ensure_berlin_tz(sorted_bookings[0].timestamp)
+    last_stamp = ensure_berlin_tz(sorted_bookings[-1].timestamp)
 
-    pause_seconds = 0
-    SIX_HOURS = 6 * 3600
-    NINE_HOURS = 9 * 3600
+    # If the session is for the current, ongoing day, the end time is now.
+    if is_ongoing_day and sorted_bookings[-1].action == 'in':
+        last_stamp = get_berlin_now()
 
-    if total_presence_seconds > NINE_HOURS:
-        pause_seconds = 45 * 60
-    elif total_presence_seconds > SIX_HOURS:
-        pause_seconds = 30 * 60
-    
-    worked_seconds = total_presence_seconds - pause_seconds
-    
-    # Cap worked time at 10 hours
+    gross_session_seconds = int((last_stamp - first_stamp).total_seconds())
+
+    # Calculate manual pause seconds
+    manual_pause_seconds = 0
+    for i in range(len(sorted_bookings) - 1):
+        if sorted_bookings[i].action == 'out' and sorted_bookings[i+1].action == 'in':
+            pause_start = ensure_berlin_tz(sorted_bookings[i].timestamp)
+            pause_end = ensure_berlin_tz(sorted_bookings[i+1].timestamp)
+            manual_pause_seconds += int((pause_end - pause_start).total_seconds())
+
+    net_worked_seconds, total_pause_seconds = _calculate_net_work_time_and_pause(gross_session_seconds, manual_pause_seconds)
+
+    # Cap worked time at 10 hours as per previous logic (ArbZG § 3)
     TEN_HOURS_SECONDS = 10 * 3600
-    capped_worked_seconds = min(worked_seconds, TEN_HOURS_SECONDS)
-    
-    TARGET_SECONDS = 7 * 3600 + 48 * 60
-    overtime_seconds = capped_worked_seconds - TARGET_SECONDS
-    
-    return capped_worked_seconds, pause_seconds, overtime_seconds
+    capped_net_worked_seconds = min(net_worked_seconds, TEN_HOURS_SECONDS)
+
+    TARGET_SECONDS = 7 * 3600 + 48 * 60  # 7.8 hours
+    overtime_seconds = capped_net_worked_seconds - TARGET_SECONDS
+
+    return capped_net_worked_seconds, total_pause_seconds, overtime_seconds
+
 
 def get_or_create_user(db: Session, username: str) -> User:
     user = db.query(User).filter(User.name == username).first()
@@ -209,6 +254,7 @@ def get_or_create_user(db: Session, username: str) -> User:
         db.refresh(user)
     return user
 
+
 def get_day_bookings(db: Session, user_id: int, date: datetime) -> List[WorkSession]:
     day_start = datetime.combine(date.date(), time.min).replace(tzinfo=BERLIN_TZ)
     day_end = day_start + timedelta(days=1)
@@ -217,6 +263,7 @@ def get_day_bookings(db: Session, user_id: int, date: datetime) -> List[WorkSess
         WorkSession.timestamp >= day_start,
         WorkSession.timestamp < day_end
     ).order_by(WorkSession.timestamp).all()
+
 
 def get_total_overtime_seconds(db: Session, user_id: int) -> int:
     all_sessions = db.query(WorkSession).filter(WorkSession.user_id == user_id).all()
@@ -230,10 +277,11 @@ def get_total_overtime_seconds(db: Session, user_id: int) -> int:
 
     for day, day_sessions in sessions_by_day.items():
         is_today = (day == current_berlin_date)
-        last_booking_action = max(day_sessions, key=lambda x: x.timestamp).action
+        # A day is considered finished if it's not today, or if it is today and the last action is 'out'.
+        is_finished_day = not is_today or (is_today and day_sessions and max(day_sessions, key=lambda x: x.timestamp).action == "out")
 
-        if not is_today or (is_today and last_booking_action == "out"):
-            _, _, overtime_seconds = calculate_daily_stats(day_sessions)
+        if is_finished_day:
+            _, _, overtime_seconds = calculate_daily_stats(day_sessions, is_ongoing_day=False)
             total_session_overtime += overtime_seconds
 
     total_adjustment = db.query(func.sum(OvertimeAdjustment.adjustment_seconds)).filter(
@@ -282,8 +330,6 @@ async def create_manual_booking(booking_data: ManualBookingCreate, db: Session =
     if booking_data.action not in ["in", "out"]:
         raise HTTPException(status_code=400, detail="Aktion muss 'in' oder 'out' sein")
     
-    # Note: Complex validation removed for simplicity, can be added back if needed
-
     new_booking = WorkSession(user_id=user_obj.id, timestamp=booking_time, action=booking_data.action)
     db.add(new_booking)
     db.commit()
@@ -304,7 +350,10 @@ async def get_day(date: str, user: str = "leon", db: Session = Depends(get_db)):
     if not bookings:
         return DayResponse(date=date, pause="00:00", worked="00:00", overtime="00:00", bookings=[])
     
-    worked_seconds, pause_seconds, overtime_seconds = calculate_daily_stats(bookings)
+    is_ongoing_day = (day_date.date() == get_berlin_now().date()) and (bookings[-1].action == 'in')
+    
+    worked_seconds, pause_seconds, overtime_seconds = calculate_daily_stats(bookings, is_ongoing_day)
+    
     first_in = next((b for b in bookings if b.action == "in"), None)
     last_out = next((b for b in reversed(bookings) if b.action == "out"), None)
     
@@ -337,9 +386,12 @@ async def get_week(year: int, week: int, user: str = "leon", db: Session = Depen
         day = week_start + timedelta(days=day_offset)
         day_bookings = get_day_bookings(db, user_obj.id, day)
         if day_bookings:
-            worked_seconds, _, overtime_seconds = calculate_daily_stats(day_bookings)
+            is_ongoing_day = (day.date() == get_berlin_now().date()) and (day_bookings[-1].action == 'in')
+            worked_seconds, _, overtime_seconds = calculate_daily_stats(day_bookings, is_ongoing_day)
             total_worked += worked_seconds
-            total_overtime += overtime_seconds
+            # Overtime for week view should only consider completed days
+            if not is_ongoing_day:
+                total_overtime += overtime_seconds
     
     target_total = 5 * (7 * 3600 + 48 * 60)
     
@@ -371,7 +423,7 @@ async def get_status(user: str = "leon", db: Session = Depends(get_db)):
     }
 
 @app.get("/sessions", response_model=List[WorkSessionResponse])
-async def get_all_sessions(user: str = "leon", limit: int = 100, db: Session = Depends(get_db)):
+async def get_all_sessions(user: str = "leon", limit: int = 500, db: Session = Depends(get_db)):
     user_obj = get_or_create_user(db, user)
     bookings = db.query(WorkSession).filter(WorkSession.user_id == user_obj.id).order_by(desc(WorkSession.timestamp)).limit(limit).all()
     return [WorkSessionResponse(
@@ -396,25 +448,27 @@ async def get_time_info(user: str = "leon", db: Session = Depends(get_db)):
     current_time = get_berlin_now()
     today_bookings = get_day_bookings(db, user_obj.id, current_time)
     
-    # --- Presence Calculation ---
-    total_presence_seconds = 0
-    current_in_time = None
+    # --- Recalculate current state ---
     is_currently_in = False
+    gross_session_seconds = 0
+    manual_pause_seconds = 0
+    
     if today_bookings:
         sorted_bookings = sorted(today_bookings, key=lambda x: x.timestamp)
-        if sorted_bookings[-1].action == "in":
-            is_currently_in = True
-        for booking in sorted_bookings:
-            if booking.action == "in":
-                current_in_time = ensure_berlin_tz(booking.timestamp)
-            elif booking.action == "out" and current_in_time:
-                total_presence_seconds += int((ensure_berlin_tz(booking.timestamp) - current_in_time).total_seconds())
-                current_in_time = None
-    if is_currently_in and current_in_time:
-        total_presence_seconds += int((current_time - current_in_time).total_seconds())
+        is_currently_in = sorted_bookings[-1].action == "in"
+        
+        first_stamp = ensure_berlin_tz(sorted_bookings[0].timestamp)
+        last_stamp = current_time if is_currently_in else ensure_berlin_tz(sorted_bookings[-1].timestamp)
+        gross_session_seconds = int((last_stamp - first_stamp).total_seconds())
 
-    # --- Current Stats ---
-    worked_seconds, pause_seconds, _ = calculate_daily_stats(today_bookings)
+        for i in range(len(sorted_bookings) - 1):
+            if sorted_bookings[i].action == 'out' and sorted_bookings[i+1].action == 'in':
+                pause_start = ensure_berlin_tz(sorted_bookings[i].timestamp)
+                pause_end = ensure_berlin_tz(sorted_bookings[i+1].timestamp)
+                manual_pause_seconds += int((pause_end - pause_start).total_seconds())
+
+    # --- Current Stats using the main calculation logic ---
+    worked_seconds, _, _ = calculate_daily_stats(today_bookings, is_ongoing_day=is_currently_in)
     target_seconds = 7 * 3600 + 48 * 60
     remaining_work_seconds = max(0, target_seconds - worked_seconds)
     
@@ -422,41 +476,54 @@ async def get_time_info(user: str = "leon", db: Session = Depends(get_db)):
     time_to_6h, time_to_9h, time_to_10h, estimated_end_time = None, None, None, None
 
     if is_currently_in:
-        # Helper for smart predictions
-        def predict_duration(target_seconds, remaining_target, is_presence_target):
-            if remaining_target <= 0:
-                return None
-
-            additional_seconds = remaining_target
-            for _ in range(5): # Safety break
-                future_presence = total_presence_seconds + additional_seconds
-                future_pause = 0
-                if future_presence > 9 * 3600:
-                    future_pause = 30 * 60 + min(future_presence - 9 * 3600, 15 * 60)
-                elif future_presence > 6 * 3600:
-                    future_pause = min(future_presence - 6 * 3600, 30 * 60)
+        def predict_additional_gross_time(remaining_net_work_seconds_target: int) -> int:
+            """Predicts the additional gross time needed to reach a net work time target."""
+            if remaining_net_work_seconds_target <= 0: return 0
+            
+            additional_gross = remaining_net_work_seconds_target
+            for _ in range(5): # Iterate to stabilize pause calculation
+                future_gross = gross_session_seconds + additional_gross
+                future_statutory_pause = _calculate_statutory_break_for_prediction(future_gross)
                 
-                newly_incurred_pause = max(0, future_pause - pause_seconds)
-                required_additional = remaining_target + newly_incurred_pause
-
-                if required_additional == additional_seconds:
+                # The additional pause to be fulfilled is the part of the future statutory pause not yet covered by manual breaks
+                unfulfilled_pause = max(0, future_statutory_pause - manual_pause_seconds)
+                
+                # The additional gross time must cover the remaining net work and the unfulfilled pause
+                new_additional_gross = remaining_net_work_seconds_target + unfulfilled_pause
+                
+                if abs(new_additional_gross - additional_gross) < 1:
                     break
-                additional_seconds = required_additional
-            return additional_seconds
+                additional_gross = new_additional_gross
+            return additional_gross
 
-        # Smart Presence Milestones
-        duration_to_6h = predict_duration(6 * 3600, 6 * 3600 - total_presence_seconds, True)
-        if duration_to_6h: time_to_6h = (current_time + timedelta(seconds=duration_to_6h)).strftime("%H:%M")
+        # Net Work Time Milestones (when is net work time reached)
+        worked_seconds_net = worked_seconds # Use the already calculated net time
 
-        duration_to_9h = predict_duration(9 * 3600, 9 * 3600 - total_presence_seconds, True)
-        if duration_to_9h: time_to_9h = (current_time + timedelta(seconds=duration_to_9h)).strftime("%H:%M")
+        remaining_to_6h_net = (6 * 3600) - worked_seconds_net
+        if remaining_to_6h_net > 0:
+            additional_gross_for_6h = predict_additional_gross_time(remaining_to_6h_net)
+            if additional_gross_for_6h > 0:
+                time_to_6h = (current_time + timedelta(seconds=additional_gross_for_6h)).strftime("%H:%M")
 
-        duration_to_10h = predict_duration(10 * 3600, 10 * 3600 - total_presence_seconds, True)
-        if duration_to_10h: time_to_10h = (current_time + timedelta(seconds=duration_to_10h)).strftime("%H:%M")
+        remaining_to_9h_net = (9 * 3600) - worked_seconds_net
+        if remaining_to_9h_net > 0:
+            additional_gross_for_9h = predict_additional_gross_time(remaining_to_9h_net)
+            if additional_gross_for_9h > 0:
+                time_to_9h = (current_time + timedelta(seconds=additional_gross_for_9h)).strftime("%H:%M")
+        
+        remaining_to_10h_net = (10 * 3600) - worked_seconds_net
+        if remaining_to_10h_net > 0:
+            additional_gross_for_10h = predict_additional_gross_time(remaining_to_10h_net)
+            if additional_gross_for_10h > 0:
+                time_to_10h = (current_time + timedelta(seconds=additional_gross_for_10h)).strftime("%H:%M")
 
-        # Smart Estimated End Time (Work Target)
-        duration_to_target = predict_duration(target_seconds, remaining_work_seconds, False)
-        if duration_to_target: estimated_end_time = (current_time + timedelta(seconds=duration_to_target)).strftime("%H:%M")
+        # Estimated End Time for today's target
+        if worked_seconds < target_seconds:
+            additional_gross_for_target = predict_additional_gross_time(remaining_work_seconds)
+            if additional_gross_for_target > 0:
+                estimated_end_time = (current_time + timedelta(seconds=additional_gross_for_target)).strftime("%H:%M")
+        else:
+            estimated_end_time = current_time.strftime("%H:%M")
 
     return TimeInfoResponse(
         current_time=current_time.strftime("%H:%M"),

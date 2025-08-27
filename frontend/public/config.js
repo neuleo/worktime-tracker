@@ -24,7 +24,8 @@ let appState = {
     currentTime: new Date(),
     isOnline: navigator.onLine,
     activeTab: 'today',
-    currentPage: 'dashboard'
+    currentPage: 'dashboard',
+    plannedDepartureTime: ''
 };
 
 // Timer management

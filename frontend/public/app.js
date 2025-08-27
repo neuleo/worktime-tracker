@@ -18,6 +18,11 @@ function navigateTo(page) {
     if (timers.liveUpdate) clearInterval(timers.liveUpdate);
     if (timers.timeInfoLiveUpdate) clearInterval(timers.timeInfoLiveUpdate);
 
+    // Clear page-specific state
+    if (appState.currentPage === 'timeinfo') {
+        appState.plannedDepartureTime = '';
+    }
+
     appState.currentPage = page;
     closeMenu();
     
@@ -75,9 +80,12 @@ function handleOvertimeSubmit(event) {
 
 function handlePlannedDepartureChange(event) {
     const plannedTime = event.target.value;
+    appState.plannedDepartureTime = plannedTime; // Store value in state
+
     const resultEl = document.getElementById('what-if-result');
 
-    if (!plannedTime || !appState.dayData) {
+    // Only calculate if the time is fully entered (e.g., "17:30")
+    if (!plannedTime || plannedTime.length < 5 || !appState.dayData || !appState.dayData.bookings) {
         resultEl.innerHTML = '';
         return;
     }
@@ -156,6 +164,14 @@ function setupTimeInfoLiveUpdates() {
         timers.timeInfoLiveUpdate = setInterval(() => {
             loadTimeInfo();
         }, CONFIG.LIVE_UPDATE_INTERVAL);
+    }
+}
+
+function pauseTimeInfoUpdates() {
+    if (timers.timeInfoLiveUpdate) {
+        clearInterval(timers.timeInfoLiveUpdate);
+        timers.timeInfoLiveUpdate = null; // Set to null to indicate it's paused
+        console.log('Time Info updates paused');
     }
 }
 

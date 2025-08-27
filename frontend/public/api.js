@@ -53,7 +53,7 @@ async function loadWeekData() {
 
 async function loadSessions() {
     try {
-        const response = await apiCall(`/sessions?user=${CONFIG.USER}&limit=100`);
+        const response = await apiCall(`/sessions?user=${CONFIG.USER}&limit=500`);
         const data = await response.json();
         appState.sessions = data;
         render();
