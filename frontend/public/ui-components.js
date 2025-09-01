@@ -481,11 +481,11 @@ function renderEstimatedEndTime(estimatedEndTime) {
 function renderTimeInfoMilestones(timeInfo) {
     return `
         <div class="space-y-3">
-            <h3 class="font-semibold text-gray-900">Anwesenheitszeit erreicht um:</h3>
+            <h3 class="font-semibold text-gray-900">Netto-Arbeitszeit erreicht um:</h3>
             
-            ${renderMilestone('6 Stunden Anwesenheit', timeInfo.time_to_6h, 'yellow')}
-            ${renderMilestone('9 Stunden Anwesenheit', timeInfo.time_to_9h, 'orange')}
-            ${renderMilestone('10 Stunden Maximum', timeInfo.time_to_10h, 'red')}
+            ${renderMilestone('6h Arbeitszeit', timeInfo.time_to_6h, 'yellow')}
+            ${renderMilestone('9h Arbeitszeit', timeInfo.time_to_9h, 'orange')}
+            ${renderMilestone('10h Arbeitszeit', timeInfo.time_to_10h, 'red')}
         </div>
     `;
 }

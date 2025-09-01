@@ -548,26 +548,23 @@ async def get_time_info(user: str = "leon", db: Session = Depends(get_db)):
                 additional_gross = new_additional_gross
             return additional_gross
 
-        # Net Work Time Milestones (when is net work time reached)
-        worked_seconds_net = worked_seconds # Use the already calculated net time
+        # Milestone Calculations
+        first_stamp = ensure_berlin_tz(sorted_bookings[0].timestamp)
 
-        remaining_to_6h_net = (6 * 3600) - worked_seconds_net
-        if remaining_to_6h_net > 0:
-            additional_gross_for_6h = predict_additional_gross_time(remaining_to_6h_net)
-            if additional_gross_for_6h > 0:
-                time_to_6h = (current_time + timedelta(seconds=additional_gross_for_6h)).strftime("%H:%M")
+        # Time to 6h Net (no break deduction)
+        time_to_6h_target = first_stamp + timedelta(hours=6)
+        if current_time < time_to_6h_target:
+            time_to_6h = time_to_6h_target.strftime("%H:%M")
 
-        remaining_to_9h_net = (9 * 3600) - worked_seconds_net
-        if remaining_to_9h_net > 0:
-            additional_gross_for_9h = predict_additional_gross_time(remaining_to_9h_net)
-            if additional_gross_for_9h > 0:
-                time_to_9h = (current_time + timedelta(seconds=additional_gross_for_9h)).strftime("%H:%M")
+        # Time to 9h Net (with 30min break)
+        time_to_9h_target = first_stamp + timedelta(hours=9, minutes=30)
+        if current_time < time_to_9h_target:
+            time_to_9h = time_to_9h_target.strftime("%H:%M")
         
-        remaining_to_10h_net = (10 * 3600) - worked_seconds_net
-        if remaining_to_10h_net > 0:
-            additional_gross_for_10h = predict_additional_gross_time(remaining_to_10h_net)
-            if additional_gross_for_10h > 0:
-                time_to_10h = (current_time + timedelta(seconds=additional_gross_for_10h)).strftime("%H:%M")
+        # Time to 10h Net (with 45min break)
+        time_to_10h_target = first_stamp + timedelta(hours=10, minutes=45)
+        if current_time < time_to_10h_target:
+            time_to_10h = time_to_10h_target.strftime("%H:%M")
 
         # Estimated End Time for today's target
         if worked_seconds < target_seconds:
