@@ -1,19 +1,17 @@
 // App Logic and Event Handlers
 
-// Menu functions
-function openMenu() {
-    const overlay = document.getElementById('menu-overlay');
-    overlay.classList.remove('opacity-0', 'pointer-events-none');
-    overlay.classList.add('opacity-100', 'menu-open');
-}
+// --- ROUTER ---
+const routes = ['dashboard', 'sessions', 'timeinfo', 'manual', 'flextime'];
 
-function closeMenu() {
-    const overlay = document.getElementById('menu-overlay');
-    overlay.classList.add('opacity-0', 'pointer-events-none');
-    overlay.classList.remove('opacity-100', 'menu-open');
-}
+function router() {
+    const page = window.location.hash.substring(1) || 'dashboard';
+    
+    if (!routes.includes(page)) {
+        console.warn(`Unknown route: ${page}, redirecting to dashboard.`);
+        navigateTo('dashboard');
+        return;
+    }
 
-function navigateTo(page) {
     // Clear all specific page timers first to avoid conflicts
     if (timers.liveUpdate) clearInterval(timers.liveUpdate);
     if (timers.timeInfoLiveUpdate) clearInterval(timers.timeInfoLiveUpdate);
@@ -36,11 +34,32 @@ function navigateTo(page) {
         loadOvertimeData();
     } else if (page === 'dashboard') {
         // Dashboard data is loaded by init and periodic refresh, live updates are handled by setupLiveUpdates
+        // Ensure live updates are running if we navigate here
+        setupLiveUpdates();
     }
     
     render();
 }
 
+function navigateTo(page) {
+    window.location.hash = page;
+}
+
+
+// --- MENU ---
+function openMenu() {
+    const overlay = document.getElementById('menu-overlay');
+    overlay.classList.remove('opacity-0', 'pointer-events-none');
+    overlay.classList.add('opacity-100', 'menu-open');
+}
+
+function closeMenu() {
+    const overlay = document.getElementById('menu-overlay');
+    overlay.classList.add('opacity-0', 'pointer-events-none');
+    overlay.classList.remove('opacity-100', 'menu-open');
+}
+
+// --- UI HANDLERS ---
 function setActiveTab(tab) {
     appState.activeTab = tab;
     render();
@@ -84,21 +103,15 @@ function handlePlannedDepartureChange(event) {
 
     const resultEl = document.getElementById('what-if-result');
 
-    // Only calculate if the time is fully entered (e.g., "17:30")
     if (!plannedTime || plannedTime.length < 5 || !appState.dayData || !appState.dayData.bookings) {
         resultEl.innerHTML = '';
         return;
     }
 
-    // Deep copy today's bookings to avoid modifying the state directly
     let tempBookings = JSON.parse(JSON.stringify(appState.dayData.bookings));
-
-    // Add the planned departure as a temporary 'out' booking
     tempBookings.push({ action: 'out', time: plannedTime });
 
     const stats = calculateDailyStatsJS(tempBookings);
-
-    // Display the result
     const overtimeColor = getOvertimeColor(stats.overtime);
     resultEl.innerHTML = `
         <div class="text-center mt-4 p-4 bg-gray-50 rounded-lg">
@@ -137,16 +150,11 @@ function handleEditBookingSubmit(event) {
     updateBooking(id, date, action, time);
 }
 
-// Live updates for timer display
+// --- LIVE UPDATES ---
 function setupLiveUpdates() {
-    // Clear existing timer
     if (timers.liveUpdate) clearInterval(timers.liveUpdate);
-    
-    // Only start live updates if user is stamped in
     if (appState.status.status === 'in') {
-        timers.liveUpdate = setInterval(() => {
-            updateLiveDuration();
-        }, CONFIG.LIVE_UPDATE_INTERVAL);
+        timers.liveUpdate = setInterval(updateLiveDuration, CONFIG.LIVE_UPDATE_INTERVAL);
     }
 }
 
@@ -161,7 +169,6 @@ function updateLiveDuration() {
         const seconds = durationSeconds % 60;
         const durationStr = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
         
-        // Update the duration display
         const durationEl = document.getElementById('live-duration');
         if (durationEl) {
             durationEl.textContent = durationStr;
@@ -169,44 +176,35 @@ function updateLiveDuration() {
     }
 }
 
-// Live updates for timeinfo page
 function setupTimeInfoLiveUpdates() {
-    // Clear existing timer
     if (timers.timeInfoLiveUpdate) clearInterval(timers.timeInfoLiveUpdate);
-
-    // Only start live updates if on timeinfo page
     if (appState.currentPage === 'timeinfo') {
-        timers.timeInfoLiveUpdate = setInterval(() => {
-            loadTimeInfo();
-        }, CONFIG.LIVE_UPDATE_INTERVAL);
+        timers.timeInfoLiveUpdate = setInterval(loadTimeInfo, CONFIG.LIVE_UPDATE_INTERVAL);
     }
 }
 
 function pauseTimeInfoUpdates() {
     if (timers.timeInfoLiveUpdate) {
         clearInterval(timers.timeInfoLiveUpdate);
-        timers.timeInfoLiveUpdate = null; // Set to null to indicate it's paused
+        timers.timeInfoLiveUpdate = null;
         console.log('Time Info updates paused');
     }
 }
 
-// Update clock every second
 function startClock() {
     if (timers.clock) clearInterval(timers.clock);
     timers.clock = setInterval(() => {
         appState.currentTime = new Date();
-        // Only update the time display, not full render
-        const timeEl = document.querySelector('.text-sm.font-mono.text-gray-600');
+        const timeEl = document.querySelector('.current-time-display');
         if (timeEl) {
             timeEl.textContent = formatTime(appState.currentTime);
         }
     }, CONFIG.CLOCK_UPDATE_INTERVAL);
 }
 
-// Main render function
+// --- RENDER ---
 function render() {
     const { currentTime, isOnline, currentPage } = appState;
-    
     const rootEl = document.getElementById('root');
     
     let pageContent = '';
@@ -232,8 +230,7 @@ function render() {
     
     rootEl.innerHTML = `
         <div class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 status-bar-safe">
-            <!-- Header -->
-            <div class="bg-white shadow-sm border-b">
+            <header class="bg-white shadow-sm border-b sticky top-0 z-10">
                 <div class="max-w-md mx-auto px-4 py-4">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center space-x-3">
@@ -247,19 +244,17 @@ function render() {
                         </div>
                         <div class="flex items-center space-x-2">
                             ${createIcon(isOnline ? 'wifi' : 'wifioff', `h-4 w-4 ${isOnline ? 'text-green-500' : 'text-red-500'}`)}
-                            <span class="text-sm font-mono text-gray-600">${formatTime(currentTime)}</span>
+                            <span class="text-sm font-mono text-gray-600 current-time-display">${formatTime(currentTime)}</span>
                         </div>
                     </div>
                 </div>
-            </div>
+            </header>
 
-            <div class="max-w-md mx-auto px-4 py-6">
+            <main class="max-w-md mx-auto px-4 py-6">
                 ${pageContent}
-            </div>
+            </main>
         </div>
     `;
-
-    
 }
 
 function getPageTitle(page) {
@@ -273,9 +268,10 @@ function getPageTitle(page) {
     return titles[page] || 'Arbeitszeit';
 }
 
-// Event listeners
+// --- EVENT LISTENERS ---
 function setupEventListeners() {
-    // Online/Offline status
+    window.addEventListener('hashchange', router);
+
     window.addEventListener('online', () => {
         appState.isOnline = true;
         showNotification('Verbindung wiederhergestellt', 'success');
@@ -288,7 +284,6 @@ function setupEventListeners() {
         render();
     });
 
-    // Close menu when clicking outside
     document.addEventListener('click', (e) => {
         const overlay = document.getElementById('menu-overlay');
         if (e.target === overlay) {
@@ -296,74 +291,44 @@ function setupEventListeners() {
         }
     });
 
-    // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
-        // ESC to close menu
         if (e.key === 'Escape') {
             closeMenu();
         }
-        
-        // Space to stamp (only on dashboard)
         if (e.key === ' ' && appState.currentPage === 'dashboard') {
             e.preventDefault();
             handleStamp();
         }
     });
-
-    // Prevent pull-to-refresh on mobile
-    document.addEventListener('touchstart', (e) => {
-        if (e.touches.length > 1) {
-            e.preventDefault();
-        }
-    }, { passive: false });
-
-    let lastTouchEnd = 0;
-    document.addEventListener('touchend', (e) => {
-        const now = (new Date()).getTime();
-        if (now - lastTouchEnd <= 300) {
-            e.preventDefault();
-        }
-        lastTouchEnd = now;
-    }, false);
 }
 
-// Initialize app
+// --- INITIALIZE APP ---
 function init() {
     console.log('🚀 Arbeitszeit Tracker starting...');
     
     appState.isOnline = navigator.onLine;
     
-    // Setup event listeners
     setupEventListeners();
     
-    // Load initial data
     Promise.all([
         loadStatus(),
         loadTodayData(),
         loadWeekData()
     ]).then(() => {
         console.log('✅ Initial data loaded');
-        // After initial data load, set up live updates for the initial page
-        if (appState.currentPage === 'dashboard') {
-            setupLiveUpdates();
-        } else if (appState.currentPage === 'timeinfo') {
-            setupTimeInfoLiveUpdates();
-        }
+        router(); // Initial route handling
     }).catch((error) => {
         console.error('❌ Failed to load initial data:', error);
         showNotification('Fehler beim Laden der Daten', 'error');
+        router(); // Route even if data load fails
     });
     
-    // Initial render
-    render();
-    
-    // Start clock
     startClock();
     
     console.log('✅ Arbeitszeit Tracker initialized');
 }
 
-// Cleanup on page unload
+// --- LIFECYCLE ---
 window.addEventListener('beforeunload', () => {
     console.log('🧹 Cleaning up timers...');
     if (timers.liveUpdate) clearInterval(timers.liveUpdate);
@@ -371,55 +336,18 @@ window.addEventListener('beforeunload', () => {
     if (timers.clock) clearInterval(timers.clock);
 });
 
-// Handle page visibility changes (for mobile browsers)
 document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
-        // Page became visible - refresh data if online
         if (appState.isOnline) {
             console.log('📱 Page visible - refreshing data');
             loadStatus();
-            if (appState.currentPage === 'dashboard') {
-                loadTodayData();
-                loadWeekData();
-                setupLiveUpdates(); // Restart dashboard live updates
-            } else if (appState.currentPage === 'timeinfo') {
-                loadTimeInfo(); // Refresh time info
-                setupTimeInfoLiveUpdates(); // Restart time info live updates
-            }
+            router(); // Re-run router logic to refresh data for current page
         }
-    } else { // Page became hidden
+    } else {
         if (timers.liveUpdate) clearInterval(timers.liveUpdate);
         if (timers.timeInfoLiveUpdate) clearInterval(timers.timeInfoLiveUpdate);
     }
 });
-
-// Handle focus/blur for better mobile experience
-window.addEventListener('focus', () => {
-    if (appState.isOnline) {
-        loadStatus();
-        if (appState.currentPage === 'dashboard') {
-            setupLiveUpdates();
-        } else if (appState.currentPage === 'timeinfo') {
-            setupTimeInfoLiveUpdates();
-        }
-    }
-});
-
-// Periodic data refresh (every 5 minutes when online and active)
-setInterval(() => {
-    if (appState.isOnline && !document.hidden) {
-        console.log('🔄 Periodic data refresh');
-        loadStatus();
-        if (appState.currentPage === 'dashboard') {
-            loadTodayData();
-            loadWeekData();
-        }
-        // No need to call setupLiveUpdates here, as it's handled by visibilitychange/focus/navigateTo
-    } else { // If offline or hidden, clear live update timers
-        if (timers.liveUpdate) clearInterval(timers.liveUpdate);
-        if (timers.timeInfoLiveUpdate) clearInterval(timers.timeInfoLiveUpdate);
-    }
-}, 5 * 60 * 1000); // 5 minutes
 
 // Start the app
 init();
