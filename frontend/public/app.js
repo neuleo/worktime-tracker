@@ -122,6 +122,21 @@ function closeOvertimeModal() {
     }
 }
 
+function handleEditBookingSubmit(event) {
+    event.preventDefault();
+    const id = document.getElementById('edit-booking-id').value;
+    const date = document.getElementById('edit-booking-date').value;
+    const action = document.getElementById('edit-booking-action').value;
+    const time = document.getElementById('edit-booking-time').value;
+
+    if (!id || !date || !action || !time) {
+        showNotification('Bitte alle Felder ausfüllen', 'error');
+        return;
+    }
+
+    updateBooking(id, date, action, time);
+}
+
 // Live updates for timer display
 function setupLiveUpdates() {
     // Clear existing timer

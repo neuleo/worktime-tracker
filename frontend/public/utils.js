@@ -88,22 +88,23 @@ function calculateDailyStatsJS(bookings) {
     }
 
     // --- New Pause Calculation Logic ---
-    const gross_session_minutes = gross_session_seconds / 60;
-    let statutory_break_minutes = 0;
+    let statutory_break_seconds = 0;
+    const SIX_HOURS_IN_SECONDS = 6 * 3600;
+    const SIX_HOURS_30_MIN_IN_SECONDS = 6.5 * 3600;
+    const NINE_HOURS_IN_SECONDS = 9 * 3600;
+    const NINE_HOURS_15_MIN_IN_SECONDS = 9.25 * 3600;
 
-    if (gross_session_minutes <= 360) { // <= 6h
-        statutory_break_minutes = 0;
-    } else if (gross_session_minutes > 360 && gross_session_minutes <= 390) { // > 6h and <= 6h 30m
-        statutory_break_minutes = gross_session_minutes - 360;
-    } else if (gross_session_minutes > 390 && gross_session_minutes <= 540) { // > 6h 30m and <= 9h
-        statutory_break_minutes = 30;
-    } else if (gross_session_minutes > 540 && gross_session_minutes <= 555) { // > 9h and <= 9h 15m
-        statutory_break_minutes = 30 + (gross_session_minutes - 540);
+    if (gross_session_seconds <= SIX_HOURS_IN_SECONDS) { // <= 6h
+        statutory_break_seconds = 0;
+    } else if (gross_session_seconds > SIX_HOURS_IN_SECONDS && gross_session_seconds <= SIX_HOURS_30_MIN_IN_SECONDS) { // > 6h and <= 6h 30m
+        statutory_break_seconds = gross_session_seconds - SIX_HOURS_IN_SECONDS;
+    } else if (gross_session_seconds > SIX_HOURS_30_MIN_IN_SECONDS && gross_session_seconds <= NINE_HOURS_IN_SECONDS) { // > 6h 30m and <= 9h
+        statutory_break_seconds = 30 * 60;
+    } else if (gross_session_seconds > NINE_HOURS_IN_SECONDS && gross_session_seconds <= NINE_HOURS_15_MIN_IN_SECONDS) { // > 9h and <= 9h 15m
+        statutory_break_seconds = (30 * 60) + (gross_session_seconds - NINE_HOURS_IN_SECONDS);
     } else { // > 9h 15m
-        statutory_break_minutes = 45;
+        statutory_break_seconds = 45 * 60;
     }
-
-    const statutory_break_seconds = Math.floor(statutory_break_minutes * 60);
     const total_deducted_pause_seconds = Math.max(manual_pause_seconds, statutory_break_seconds);
     
     let net_work_seconds = gross_session_seconds - total_deducted_pause_seconds;
@@ -155,7 +156,9 @@ function createIcon(name, className = 'h-6 w-6') {
         trending: `<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>`,
         menu: `<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>`,
         wifi: `<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path></svg>`,
-        wifioff: `<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 trapper" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>`,
+        wifioff: `<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>`,
+        trash: `<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>`,
+        edit: `<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" /></svg>`,
         gleitzeit: `<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 11l5-5m0 0l5 5m-5-5v12"></path></svg>`,
         settings: `<svg class="${className}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>`
     };

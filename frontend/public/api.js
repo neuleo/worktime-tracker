@@ -229,3 +229,59 @@ async function createManualBooking(date, action, time) {
         showNotification(`Fehler: ${error.message}`, 'error');
     }
 }
+
+async function updateBooking(id, date, action, time) {
+    try {
+        const response = await apiCall(`/sessions/${id}`,
+            {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    user: CONFIG.USER,
+                    date: date,
+                    action: action,
+                    time: time
+                })
+            });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to update booking');
+        }
+
+        showNotification('Buchung erfolgreich aktualisiert', 'success');
+        await loadSessions();
+        await loadTodayData();
+        await loadWeekData();
+        closeEditBookingModal();
+
+    } catch (error) {
+        showNotification(`Fehler: ${error.message}`, 'error');
+    }
+}
+
+async function adjustBookingTime(id, seconds) {
+    try {
+        const response = await apiCall(`/sessions/${id}/adjust_time`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                user: CONFIG.USER,
+                seconds: seconds
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to adjust time');
+        }
+
+        showNotification('Zeit erfolgreich angepasst', 'success');
+        await loadSessions();
+        await loadTodayData();
+        await loadWeekData();
+
+    } catch (error) {
+        showNotification(`Fehler: ${error.message}`, 'error');
+    }
+}

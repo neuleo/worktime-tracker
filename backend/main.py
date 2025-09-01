@@ -168,22 +168,22 @@ def _calculate_net_work_time_and_pause(gross_session_seconds: int, manual_pause_
     Returns:
         A tuple containing (net_work_seconds, total_deducted_pause_seconds).
     """
-    # All times in minutes for easier calculation based on rules
-    gross_session_minutes = gross_session_seconds / 60
+    statutory_break_seconds = 0
+    SIX_HOURS_IN_SECONDS = 6 * 3600
+    SIX_HOURS_30_MIN_IN_SECONDS = int(6.5 * 3600)
+    NINE_HOURS_IN_SECONDS = 9 * 3600
+    NINE_HOURS_15_MIN_IN_SECONDS = int(9.25 * 3600)
 
-    statutory_break_minutes = 0
-    if gross_session_minutes <= 360:  # <= 6h
-        statutory_break_minutes = 0
-    elif 360 < gross_session_minutes <= 390:  # > 6h and <= 6h 30m
-        statutory_break_minutes = gross_session_minutes - 360
-    elif 390 < gross_session_minutes <= 540:  # > 6h 30m and <= 9h
-        statutory_break_minutes = 30
-    elif 540 < gross_session_minutes <= 555:  # > 9h and <= 9h 15m
-        statutory_break_minutes = 30 + (gross_session_minutes - 540)
+    if gross_session_seconds <= SIX_HOURS_IN_SECONDS:  # <= 6h
+        statutory_break_seconds = 0
+    elif SIX_HOURS_IN_SECONDS < gross_session_seconds <= SIX_HOURS_30_MIN_IN_SECONDS:  # > 6h and <= 6h 30m
+        statutory_break_seconds = gross_session_seconds - SIX_HOURS_IN_SECONDS
+    elif SIX_HOURS_30_MIN_IN_SECONDS < gross_session_seconds <= NINE_HOURS_IN_SECONDS:  # > 6h 30m and <= 9h
+        statutory_break_seconds = 30 * 60
+    elif NINE_HOURS_IN_SECONDS < gross_session_seconds <= NINE_HOURS_15_MIN_IN_SECONDS:  # > 9h and <= 9h 15m
+        statutory_break_seconds = (30 * 60) + (gross_session_seconds - NINE_HOURS_IN_SECONDS)
     else:  # > 9h 15m
-        statutory_break_minutes = 45
-
-    statutory_break_seconds = int(statutory_break_minutes * 60)
+        statutory_break_seconds = 45 * 60
 
     total_deducted_pause_seconds = max(manual_pause_seconds, statutory_break_seconds)
     net_work_seconds = gross_session_seconds - total_deducted_pause_seconds
@@ -196,19 +196,23 @@ def _calculate_net_work_time_and_pause(gross_session_seconds: int, manual_pause_
 
 def _calculate_statutory_break_for_prediction(gross_session_seconds: int) -> int:
     """Calculates the statutory break in seconds based on a given gross session time."""
-    gross_session_minutes = gross_session_seconds / 60
-    statutory_break_minutes = 0
-    if gross_session_minutes <= 360:
-        statutory_break_minutes = 0
-    elif 360 < gross_session_minutes <= 390:
-        statutory_break_minutes = gross_session_minutes - 360
-    elif 390 < gross_session_minutes <= 540:
-        statutory_break_minutes = 30
-    elif 540 < gross_session_minutes <= 555:
-        statutory_break_minutes = 30 + (gross_session_minutes - 540)
-    else:
-        statutory_break_minutes = 45
-    return int(statutory_break_minutes * 60)
+    statutory_break_seconds = 0
+    SIX_HOURS_IN_SECONDS = 6 * 3600
+    SIX_HOURS_30_MIN_IN_SECONDS = int(6.5 * 3600)
+    NINE_HOURS_IN_SECONDS = 9 * 3600
+    NINE_HOURS_15_MIN_IN_SECONDS = int(9.25 * 3600)
+
+    if gross_session_seconds <= SIX_HOURS_IN_SECONDS:  # <= 6h
+        statutory_break_seconds = 0
+    elif SIX_HOURS_IN_SECONDS < gross_session_seconds <= SIX_HOURS_30_MIN_IN_SECONDS:  # > 6h and <= 6h 30m
+        statutory_break_seconds = gross_session_seconds - SIX_HOURS_IN_SECONDS
+    elif SIX_HOURS_30_MIN_IN_SECONDS < gross_session_seconds <= NINE_HOURS_IN_SECONDS:  # > 6h 30m and <= 9h
+        statutory_break_seconds = 30 * 60
+    elif NINE_HOURS_IN_SECONDS < gross_session_seconds <= NINE_HOURS_15_MIN_IN_SECONDS:  # > 9h and <= 9h 15m
+        statutory_break_seconds = (30 * 60) + (gross_session_seconds - NINE_HOURS_IN_SECONDS)
+    else:  # > 9h 15m
+        statutory_break_seconds = 45 * 60
+    return statutory_break_seconds
 
 
 def calculate_daily_stats(bookings: List[WorkSession], is_ongoing_day: bool) -> tuple[int, int, int]:
@@ -441,6 +445,54 @@ async def delete_session(session_id: int, user: str = "leon", db: Session = Depe
     db.delete(booking)
     db.commit()
     return {"message": "Booking deleted successfully"}
+
+
+class SessionUpdateRequest(BaseModel):
+    user: str
+    date: str
+    action: str
+    time: str
+
+class SessionTimeAdjustRequest(BaseModel):
+    user: str
+    seconds: int
+
+@app.put("/sessions/{session_id}")
+async def update_session(session_id: int, request: SessionUpdateRequest, db: Session = Depends(get_db)):
+    user_obj = get_or_create_user(db, request.user)
+    booking = db.query(WorkSession).filter(WorkSession.id == session_id, WorkSession.user_id == user_obj.id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    try:
+        date_obj = datetime.strptime(request.date, "%Y-%m-%d").date()
+        time_obj = datetime.strptime(request.time, "%H:%M").time()
+        booking.timestamp = datetime.combine(date_obj, time_obj).replace(tzinfo=BERLIN_TZ)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date or time format")
+
+    if request.action not in ["in", "out"]:
+        raise HTTPException(status_code=400, detail="Action must be 'in' or 'out'")
+    
+    booking.action = request.action
+    
+    db.commit()
+    db.refresh(booking)
+    
+    return {"message": "Booking updated successfully"}
+
+@app.post("/sessions/{session_id}/adjust_time")
+async def adjust_session_time(session_id: int, request: SessionTimeAdjustRequest, db: Session = Depends(get_db)):
+    user_obj = get_or_create_user(db, request.user)
+    booking = db.query(WorkSession).filter(WorkSession.id == session_id, WorkSession.user_id == user_obj.id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    booking.timestamp += timedelta(seconds=request.seconds)
+    db.commit()
+    db.refresh(booking)
+
+    return {"message": "Booking time adjusted successfully"}
 
 @app.get("/timeinfo", response_model=TimeInfoResponse)
 async def get_time_info(user: str = "leon", db: Session = Depends(get_db)):
