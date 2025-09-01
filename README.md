@@ -109,6 +109,41 @@ Komplett überarbeitet mit **Multi-Session-Support**, **Timezone-Korrektheit**,
 
 ---
 
+## 🔐 Security - NEU
+Diese Anwendung ist jetzt durch ein Passwort geschützt. Bevor Sie die Anwendung starten, müssen Sie zwei Umgebungsvariablen konfigurieren.
+
+**1. Erstellen Sie eine `.env`-Datei:**
+Erstellen Sie eine Datei mit dem Namen `.env` im Hauptverzeichnis des Projekts (`/home/docker/worktime-tracker`).
+
+**2. Fügen Sie die folgenden Variablen hinzu:**
+```
+# .env file
+APP_PASSWORD=IhrSuperGeheimesPasswort
+JWT_SECRET_KEY=ein_sehr_langer_zufälliger_string_zur_sicherheit
+STAMP_WEBHOOK_SECRET=eine_andere_geheime_zeichenkette_für_den_webhook
+```
+
+-   `APP_PASSWORD`: Ersetzen Sie `IhrSuperGeheimesPasswort` durch das Passwort, das Sie für den Login verwenden möchten.
+-   `JWT_SECRET_KEY`: Dies ist ein geheimer Schlüssel zur Absicherung der Sessions. Ersetzen Sie den Beispielwert durch eine lange, zufällige Zeichenkette.
+-   `STAMP_WEBHOOK_SECRET`: Dies ist eine geheime Zeichenkette für den MacroDroid-Webhook. Ersetzen Sie den Wert ebenfalls durch eine lange, zufällige Zeichenkette.
+
+    Sie können sichere Schlüssel mit dem folgenden Befehl generieren:
+    ```bash
+    openssl rand -hex 32
+    ```
+
+**3. Aktualisieren Sie `docker-compose.yml`:**
+Stellen Sie sicher, dass Ihre `docker-compose.yml`-Datei die `.env`-Datei für den Backend-Service lädt:
+```yaml
+services:
+  backend:
+    # ... andere Konfigurationen
+    env_file:
+      - .env
+```
+
 ## ⚙️ Installation & Deployment
+Nachdem Sie die `.env`-Datei konfiguriert haben, starten Sie die Anwendung wie gewohnt:
 ```bash
 docker-compose up --build
+```
