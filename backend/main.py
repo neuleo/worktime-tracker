@@ -540,15 +540,28 @@ async def get_time_info(user: str = "leon", db: Session = Depends(get_db)):
 
         first_stamp = ensure_berlin_tz(sorted_bookings[0].timestamp)
 
-        time_to_6h_target = first_stamp + timedelta(hours=6)
+        # 6h Net Milestone
+        # Assumed break is 0, but we must account for any manual break taken.
+        gross_duration_for_6h = (6 * 3600) + manual_pause_seconds
+        time_to_6h_target = first_stamp + timedelta(seconds=gross_duration_for_6h)
         if current_time < time_to_6h_target:
             time_to_6h = time_to_6h_target.strftime("%H:%M")
 
-        time_to_9h_target = first_stamp + timedelta(hours=9, minutes=30)
+        # 9h Net Milestone
+        # Assumed break is 30 mins.
+        assumed_break_9h = 30 * 60
+        total_break_9h = max(manual_pause_seconds, assumed_break_9h)
+        gross_duration_for_9h = (9 * 3600) + total_break_9h
+        time_to_9h_target = first_stamp + timedelta(seconds=gross_duration_for_9h)
         if current_time < time_to_9h_target:
             time_to_9h = time_to_9h_target.strftime("%H:%M")
         
-        time_to_10h_target = first_stamp + timedelta(hours=10, minutes=45)
+        # 10h Net Milestone
+        # Assumed break is 45 mins.
+        assumed_break_10h = 45 * 60
+        total_break_10h = max(manual_pause_seconds, assumed_break_10h)
+        gross_duration_for_10h = (10 * 3600) + total_break_10h
+        time_to_10h_target = first_stamp + timedelta(seconds=gross_duration_for_10h)
         if current_time < time_to_10h_target:
             time_to_10h = time_to_10h_target.strftime("%H:%M")
 
