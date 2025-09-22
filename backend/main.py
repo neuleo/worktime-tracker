@@ -160,6 +160,8 @@ class DailySummaryPoint(BaseModel):
     date: str
     worked_hours: float
     target_hours: float
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
 
 class StatisticsResponse(BaseModel):
     overtime_trend: List[OvertimeTrendPoint]
@@ -703,6 +705,13 @@ async def get_statistics(from_date: str, to_date: str, user: str = "leon", db: S
     for day, day_sessions in sessions_by_day.items():
         if not day_sessions:
             continue
+
+        sorted_sessions = sorted(day_sessions, key=lambda x: x.timestamp)
+        start_time = ensure_berlin_tz(sorted_sessions[0].timestamp).time() if sorted_sessions else None
+        end_time = ensure_berlin_tz(sorted_sessions[-1].timestamp).time() if len(sorted_sessions) > 1 and sorted_sessions[-1].action == 'out' else None
+        
+        daily_stats[day]['start_time'] = start_time
+        daily_stats[day]['end_time'] = end_time
         
         is_finished_day = max(day_sessions, key=lambda x: x.timestamp).action == "out"
         if is_finished_day:
@@ -750,14 +759,18 @@ async def get_statistics(from_date: str, to_date: str, user: str = "leon", db: S
     current_date = start_date
     while current_date <= end_date:
         stats_for_day = daily_stats[current_date]
-        worked_hours = round(stats_for_day['worked_seconds'] / 3600, 2)
-        target_hours = round(TARGET_SECONDS_PER_DAY / 3600, 2) if stats_for_day['worked_seconds'] > 0 else 0
+        worked_hours = round(stats_for_day.get('worked_seconds', 0) / 3600, 2)
+        target_hours = round(TARGET_SECONDS_PER_DAY / 3600, 2) if stats_for_day.get('worked_seconds', 0) > 0 else 0
+        start_time_val = stats_for_day.get('start_time')
+        end_time_val = stats_for_day.get('end_time')
 
         # Daily Summary
         daily_summary_points.append(DailySummaryPoint(
             date=current_date.isoformat(),
             worked_hours=worked_hours,
-            target_hours=target_hours
+            target_hours=target_hours,
+            start_time=start_time_val.strftime('%H:%M') if start_time_val else None,
+            end_time=end_time_val.strftime('%H:%M') if end_time_val else None
         ))
 
         # Weekly Summary
