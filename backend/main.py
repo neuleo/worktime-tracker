@@ -556,26 +556,26 @@ async def get_time_info(user: str = "leon", paola: bool = False, db: Session = D
     if is_currently_in and today_bookings:
         first_stamp = ensure_berlin_tz(sorted_bookings[0].timestamp)
 
+        paola_is_active = paola and not (manual_pause_seconds > 0)
+        planned_pause_seconds = 50 * 60 if paola_is_active else manual_pause_seconds
+
         # 6h Net Milestone
-        # Assumed break is 0, but we must account for any manual break taken.
-        gross_duration_for_6h = (6 * 3600) + manual_pause_seconds
+        gross_duration_for_6h = (6 * 3600) + planned_pause_seconds
         time_to_6h_target = first_stamp + timedelta(seconds=gross_duration_for_6h)
         if current_time < time_to_6h_target:
             time_to_6h = time_to_6h_target.strftime("%H:%M")
 
         # 9h Net Milestone
-        # Assumed break is 30 mins.
         assumed_break_9h = 30 * 60
-        total_break_9h = max(manual_pause_seconds, assumed_break_9h)
+        total_break_9h = max(planned_pause_seconds, assumed_break_9h)
         gross_duration_for_9h = (9 * 3600) + total_break_9h
         time_to_9h_target = first_stamp + timedelta(seconds=gross_duration_for_9h)
         if current_time < time_to_9h_target:
             time_to_9h = time_to_9h_target.strftime("%H:%M")
         
         # 10h Net Milestone
-        # Assumed break is 45 mins.
         assumed_break_10h = 45 * 60
-        total_break_10h = max(manual_pause_seconds, assumed_break_10h)
+        total_break_10h = max(planned_pause_seconds, assumed_break_10h)
         gross_duration_for_10h = (10 * 3600) + total_break_10h
         time_to_10h_target = first_stamp + timedelta(seconds=gross_duration_for_10h)
         if current_time < time_to_10h_target:
