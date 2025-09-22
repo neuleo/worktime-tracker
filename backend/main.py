@@ -138,6 +138,36 @@ class SessionTimeAdjustRequest(BaseModel):
     user: str
     seconds: int
 
+class OvertimeAdjustmentResponse(BaseModel):
+    id: int
+    timestamp: str
+    adjustment_seconds: int
+
+class AllDataResponse(BaseModel):
+    work_sessions: List[WorkSessionResponse]
+    overtime_adjustments: List[OvertimeAdjustmentResponse]
+
+class OvertimeTrendPoint(BaseModel):
+    date: str
+    overtime_hours: float
+
+class WeeklySummaryPoint(BaseModel):
+    week: str
+    worked_hours: float
+    target_hours: float
+
+class DailySummaryPoint(BaseModel):
+    date: str
+    worked_hours: float
+    target_hours: float
+
+class StatisticsResponse(BaseModel):
+    overtime_trend: List[OvertimeTrendPoint]
+    weekly_summary: List[WeeklySummaryPoint]
+    daily_summary: List[DailySummaryPoint]
+
+
+
 
 # --- HELPER & UTILITY FUNCTIONS ---
 def get_berlin_now():
@@ -621,6 +651,131 @@ async def adjust_overtime(request: OvertimeAdjustmentRequest, db: Session = Depe
     db.add(new_adjustment)
     db.commit()
     return {"message": "Overtime adjusted successfully"}
+
+@api_router.get("/all-data", response_model=AllDataResponse)
+async def get_all_data(user: str = "leon", db: Session = Depends(get_db)):
+    user_obj = get_or_create_user(db, user)
+    
+    work_sessions = db.query(WorkSession).filter(WorkSession.user_id == user_obj.id).order_by(WorkSession.timestamp).all()
+    overtime_adjustments = db.query(OvertimeAdjustment).filter(OvertimeAdjustment.user_id == user_obj.id).order_by(OvertimeAdjustment.timestamp).all()
+
+    work_sessions_response = [WorkSessionResponse(
+        id=ws.id,
+        date=ensure_berlin_tz(ws.timestamp).strftime("%Y-%m-%d"),
+        action=ws.action,
+        time=ensure_berlin_tz(ws.timestamp).strftime("%H:%M"),
+        timestamp_iso=ensure_berlin_tz(ws.timestamp).isoformat()
+    ) for ws in work_sessions]
+
+    overtime_adjustments_response = [OvertimeAdjustmentResponse(
+        id=oa.id,
+        timestamp=ensure_berlin_tz(oa.timestamp).isoformat(),
+        adjustment_seconds=oa.adjustment_seconds
+    ) for oa in overtime_adjustments]
+
+    return AllDataResponse(
+        work_sessions=work_sessions_response,
+        overtime_adjustments=overtime_adjustments_response
+    )
+
+@api_router.get("/statistics", response_model=StatisticsResponse)
+async def get_statistics(from_date: str, to_date: str, user: str = "leon", db: Session = Depends(get_db)):
+    user_obj = get_or_create_user(db, user)
+    TARGET_SECONDS_PER_DAY = 7 * 3600 + 48 * 60
+
+    try:
+        start_date = datetime.strptime(from_date, "%Y-%m-%d").date()
+        end_date = datetime.strptime(to_date, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+
+    # 1. Get all sessions and adjustments for the user
+    all_sessions = db.query(WorkSession).filter(WorkSession.user_id == user_obj.id).order_by(WorkSession.timestamp).all()
+    all_adjustments = db.query(OvertimeAdjustment).filter(OvertimeAdjustment.user_id == user_obj.id).order_by(OvertimeAdjustment.timestamp).all()
+
+    # 2. Calculate daily stats for all days
+    daily_stats = defaultdict(lambda: {'worked_seconds': 0, 'overtime_seconds': 0})
+    sessions_by_day = defaultdict(list)
+    for session in all_sessions:
+        day = ensure_berlin_tz(session.timestamp).date()
+        sessions_by_day[day].append(session)
+
+    for day, day_sessions in sessions_by_day.items():
+        if not day_sessions:
+            continue
+        
+        is_finished_day = max(day_sessions, key=lambda x: x.timestamp).action == "out"
+        if is_finished_day:
+            worked_seconds, _, overtime = calculate_daily_stats(day_sessions, is_ongoing_day=False)
+            daily_stats[day]['worked_seconds'] = worked_seconds
+            daily_stats[day]['overtime_seconds'] = overtime
+        else: # if day is not finished, just count worked time, no overtime
+            worked_seconds, _, _ = calculate_daily_stats(day_sessions, is_ongoing_day=True)
+            daily_stats[day]['worked_seconds'] = worked_seconds
+
+    # 3. Calculate Overtime Trend
+    overtime_trend = []
+    cumulative_overtime_seconds = 0
+    
+    # Get first day of user's activity to start calculation from there
+    first_session_date = all_sessions[0].timestamp.date() if all_sessions else start_date
+    
+    current_date = min(start_date, first_session_date)
+
+    # Calculate initial overtime before the requested from_date
+    while current_date < start_date:
+        cumulative_overtime_seconds += daily_stats[current_date]['overtime_seconds']
+        for adj in all_adjustments:
+            if adj.timestamp.date() == current_date:
+                cumulative_overtime_seconds += adj.adjustment_seconds
+        current_date += timedelta(days=1)
+
+    # Now calculate for the requested date range
+    while current_date <= end_date:
+        cumulative_overtime_seconds += daily_stats[current_date]['overtime_seconds']
+        for adj in all_adjustments:
+            if adj.timestamp.date() == current_date:
+                cumulative_overtime_seconds += adj.adjustment_seconds
+        
+        overtime_trend.append(OvertimeTrendPoint(
+            date=current_date.isoformat(),
+            overtime_hours=round(cumulative_overtime_seconds / 3600, 2)
+        ))
+        current_date += timedelta(days=1)
+
+    # 4. Calculate Weekly and Daily Summaries for the selected range
+    weekly_summary_points = defaultdict(lambda: {'worked_hours': 0, 'target_hours': 0})
+    daily_summary_points = []
+
+    current_date = start_date
+    while current_date <= end_date:
+        stats_for_day = daily_stats[current_date]
+        worked_hours = round(stats_for_day['worked_seconds'] / 3600, 2)
+        target_hours = round(TARGET_SECONDS_PER_DAY / 3600, 2) if stats_for_day['worked_seconds'] > 0 else 0
+
+        # Daily Summary
+        daily_summary_points.append(DailySummaryPoint(
+            date=current_date.isoformat(),
+            worked_hours=worked_hours,
+            target_hours=target_hours
+        ))
+
+        # Weekly Summary
+        week_str = f"{current_date.year}-W{current_date.isocalendar()[1]:02d}"
+        weekly_summary_points[week_str]['worked_hours'] += worked_hours
+        weekly_summary_points[week_str]['target_hours'] += target_hours
+        
+        current_date += timedelta(days=1)
+
+    weekly_summary = [WeeklySummaryPoint(week=k, **v) for k, v in sorted(weekly_summary_points.items())]
+
+    return StatisticsResponse(
+        overtime_trend=overtime_trend,
+        weekly_summary=weekly_summary,
+        daily_summary=daily_summary_points
+    )
+
+
 
 
 # --- MAIN APP SETUP ---

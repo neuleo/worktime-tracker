@@ -91,6 +91,35 @@ async function loadOvertimeData() {
     }
 }
 
+async function loadAllData() {
+    try {
+        const response = await apiCall(`/all-data?user=${CONFIG.USER}`);
+        if (!response.ok) {
+            throw new Error('Failed to load all data');
+        }
+        const data = await response.json();
+        appState.allData = data;
+        render(); // Re-render to show the new data
+    } catch (error) {
+        console.error(error.message);
+        showNotification('Fehler beim Laden der Statistikdaten', 'error');
+    }
+}
+
+async function loadStatistics(fromDate, toDate) {
+    try {
+        const response = await apiCall(`/statistics?user=${CONFIG.USER}&from_date=${fromDate}&to_date=${toDate}`);
+        if (!response.ok) {
+            throw new Error('Failed to load statistics data');
+        }
+        const data = await response.json();
+        appState.statisticsData = data;
+    } catch (error) {
+        console.error(error.message);
+        showNotification('Fehler beim Laden der Statistikdaten', 'error');
+    }
+}
+
 async function adjustOvertime(hours) {
     try {
         const response = await apiCall('/overtime', {

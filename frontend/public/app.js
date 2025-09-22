@@ -1,7 +1,7 @@
 // App Logic and Event Handlers
 
 // --- ROUTER ---
-const routes = ['dashboard', 'sessions', 'timeinfo', 'manual', 'flextime'];
+const routes = ['dashboard', 'sessions', 'timeinfo', 'manual', 'flextime', 'stats'];
 
 function router() {
     const page = window.location.hash.substring(1) || 'dashboard';
@@ -32,6 +32,8 @@ function router() {
         setupTimeInfoLiveUpdates(); // Start periodic updates
     } else if (page === 'flextime') {
         loadOvertimeData();
+    } else if (page === 'stats') {
+        // Data is loaded by renderCharts in statistics.js
     } else if (page === 'dashboard') {
         // Dashboard data is loaded by init and periodic refresh, live updates are handled by setupLiveUpdates
         // Ensure live updates are running if we navigate here
@@ -229,6 +231,9 @@ function render() {
         case 'flextime':
             pageContent = renderFlextimePage();
             break;
+        case 'stats':
+            pageContent = renderStatisticsPage();
+            break;
         default:
             pageContent = renderDashboard();
     }
@@ -260,6 +265,10 @@ function render() {
             </main>
         </div>
     `;
+
+    if (currentPage === 'stats') {
+        setTimeout(renderCharts, 0); // Use setTimeout to ensure DOM is updated
+    }
 }
 
 function getPageTitle(page) {
@@ -268,7 +277,8 @@ function getPageTitle(page) {
         'sessions': 'Buchungen',
         'timeinfo': 'Info',
         'manual': 'Buchung',
-        'flextime': 'Gleitzeit'
+        'flextime': 'Gleitzeit',
+        'stats': 'Statistik'
     };
     return titles[page] || 'Arbeitszeit';
 }
