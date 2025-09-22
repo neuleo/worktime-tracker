@@ -60,6 +60,11 @@ function closeMenu() {
 }
 
 // --- UI HANDLERS ---
+function togglePaolaButton() {
+    appState.paolaButtonActive = !appState.paolaButtonActive;
+    loadTimeInfo();
+}
+
 function setActiveTab(tab) {
     appState.activeTab = tab;
     render();

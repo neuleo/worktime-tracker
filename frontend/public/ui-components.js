@@ -397,6 +397,8 @@ function renderTimeInfo() {
                     ${renderTimeInfoStats(timeInfo)}
                     
                     <div class="space-y-4 pt-4 border-t">
+                        ${timeInfo.manual_pause_seconds === 0 ? renderPaolaToggle() : ''}
+
                         ${timeInfo.estimated_end_time ? renderEstimatedEndTime(timeInfo.estimated_end_time) : ''}
                         
                         <div>
@@ -475,6 +477,27 @@ function renderEstimatedEndTime(estimatedEndTime) {
             <div class="text-2xl font-bold text-green-700 font-mono">${estimatedEndTime}</div>
             <div class="text-sm text-green-600 mt-1">Um 7h48min zu erreichen</div>
         </div>
+    `;
+}
+
+function renderPaolaToggle() {
+    const { paolaButtonActive } = appState;
+    return `
+        <label for="paola-toggle" class="flex items-center justify-between bg-gray-50 p-3 rounded-lg mb-4 cursor-pointer">
+            <span class="text-gray-700 font-medium">
+                Paola-Pause (50min)
+            </span>
+            <div class="relative inline-block w-10 mr-2 align-middle select-none">
+                <input 
+                    type="checkbox" 
+                    id="paola-toggle" 
+                    onchange="togglePaolaButton()" 
+                    class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-2 appearance-none cursor-pointer transition-transform duration-200 ease-in-out"
+                    ${paolaButtonActive ? 'checked' : ''}
+                />
+                <label for="paola-toggle" class="toggle-label block overflow-hidden h-6 rounded-full bg-gray-300 cursor-pointer"></label>
+            </div>
+        </label>
     `;
 }
 

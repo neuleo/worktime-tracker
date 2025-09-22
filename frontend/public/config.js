@@ -25,7 +25,8 @@ let appState = {
     isOnline: navigator.onLine,
     activeTab: 'today',
     currentPage: 'dashboard',
-    plannedDepartureTime: ''
+    plannedDepartureTime: '',
+    paolaButtonActive: false
 };
 
 // Timer management

@@ -88,3 +88,13 @@ input, textarea, select {
 #overtime-modal {
     display: flex; /* Use flexbox for centering */
 }
+
+/* Toggle Switch for Paola Button */
+.toggle-checkbox:checked {
+    transform: translateX(1rem);
+    border-color: #34D399; /* Tailwind green-400 */
+}
+
+.toggle-checkbox:checked + .toggle-label {
+    background-color: #34D399; /* Tailwind green-400 */
+}

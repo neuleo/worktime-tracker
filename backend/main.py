@@ -113,6 +113,7 @@ class TimeInfoResponse(BaseModel):
     current_time: str
     time_worked_today: str
     time_remaining: str
+    manual_pause_seconds: int
     time_to_6h: Optional[str] = None
     time_to_9h: Optional[str] = None
     time_to_10h: Optional[str] = None
@@ -491,7 +492,7 @@ async def adjust_session_time(session_id: int, request: SessionTimeAdjustRequest
     return {"message": "Booking time adjusted successfully"}
 
 @api_router.get("/timeinfo", response_model=TimeInfoResponse)
-async def get_time_info(user: str = "leon", db: Session = Depends(get_db)):
+async def get_time_info(user: str = "leon", paola: bool = False, db: Session = Depends(get_db)):
     user_obj = get_or_create_user(db, user)
     current_time = get_berlin_now()
     today_bookings = get_day_bookings(db, user_obj.id, current_time)
@@ -521,23 +522,6 @@ async def get_time_info(user: str = "leon", db: Session = Depends(get_db)):
     time_to_6h, time_to_9h, time_to_10h, estimated_end_time = None, None, None, None
 
     if is_currently_in and today_bookings:
-        def predict_additional_gross_time(remaining_net_work_seconds_target: int) -> int:
-            if remaining_net_work_seconds_target <= 0: return 0
-            
-            additional_gross = remaining_net_work_seconds_target
-            for _ in range(5):
-                future_gross = gross_session_seconds + additional_gross
-                future_statutory_pause = _calculate_statutory_break_for_prediction(future_gross)
-                
-                unfulfilled_pause = max(0, future_statutory_pause - manual_pause_seconds)
-                
-                new_additional_gross = remaining_net_work_seconds_target + unfulfilled_pause
-                
-                if abs(new_additional_gross - additional_gross) < 1:
-                    break
-                additional_gross = new_additional_gross
-            return additional_gross
-
         first_stamp = ensure_berlin_tz(sorted_bookings[0].timestamp)
 
         # 6h Net Milestone
@@ -565,17 +549,56 @@ async def get_time_info(user: str = "leon", db: Session = Depends(get_db)):
         if current_time < time_to_10h_target:
             time_to_10h = time_to_10h_target.strftime("%H:%M")
 
-        if worked_seconds < target_seconds:
-            additional_gross_for_target = predict_additional_gross_time(remaining_work_seconds)
-            if additional_gross_for_target > 0:
-                estimated_end_time = (current_time + timedelta(seconds=additional_gross_for_target)).strftime("%H:%M")
-        else:
-            estimated_end_time = current_time.strftime("%H:%M")
+    # --- Prediction for Estimated End Time ---
+    if today_bookings and worked_seconds < target_seconds:
+        
+        pred_gross_seconds = gross_session_seconds
+        pred_manual_pause = manual_pause_seconds
+        
+        has_taken_break = manual_pause_seconds > 0
+        paola_is_active = paola and not has_taken_break
+
+        if not is_currently_in:
+            last_stamp_time = ensure_berlin_tz(sorted_bookings[-1].timestamp)
+            ongoing_break_seconds = int((current_time - last_stamp_time).total_seconds())
+            pred_gross_seconds += ongoing_break_seconds
+            pred_manual_pause += ongoing_break_seconds
+
+        def predict_additional_gross_time(remaining_net: int, gross_base: int, pause_base: int, paola_mode: bool) -> int:
+            if remaining_net <= 0: return 0
+            additional_gross = remaining_net
+            for _ in range(5):
+                future_gross = gross_base + additional_gross
+                future_statutory_pause = _calculate_statutory_break_for_prediction(future_gross)
+                
+                effective_break_target = future_statutory_pause
+                if paola_mode:
+                    effective_break_target = max(effective_break_target, 50 * 60)
+
+                unfulfilled_pause = max(0, effective_break_target - pause_base)
+                new_additional_gross = remaining_net + unfulfilled_pause
+                if abs(new_additional_gross - additional_gross) < 1: break
+                additional_gross = new_additional_gross
+            return additional_gross
+
+        additional_gross_needed = predict_additional_gross_time(
+            remaining_work_seconds,
+            pred_gross_seconds,
+            pred_manual_pause,
+            paola_is_active
+        )
+        
+        if additional_gross_needed > 0:
+            estimated_end_time = (current_time + timedelta(seconds=additional_gross_needed)).strftime("%H:%M")
+
+    elif is_currently_in and worked_seconds >= target_seconds:
+        estimated_end_time = current_time.strftime("%H:%M")
 
     return TimeInfoResponse(
         current_time=current_time.strftime("%H:%M"),
         time_worked_today=seconds_to_time_str(worked_seconds),
         time_remaining=seconds_to_time_str(remaining_work_seconds),
+        manual_pause_seconds=manual_pause_seconds,
         time_to_6h=time_to_6h, time_to_9h=time_to_9h, time_to_10h=time_to_10h,
         estimated_end_time=estimated_end_time
     )

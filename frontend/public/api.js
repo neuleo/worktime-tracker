@@ -64,7 +64,8 @@ async function loadSessions() {
 
 async function loadTimeInfo() {
     try {
-        const response = await apiCall(`/timeinfo?user=${CONFIG.USER}`);
+        const paolaParam = appState.paolaButtonActive ? '&paola=true' : '';
+        const response = await apiCall(`/timeinfo?user=${CONFIG.USER}${paolaParam}`);
         const data = await response.json();
         console.log('Data received for Time-Info page:', data);
         appState.timeInfo = data;
