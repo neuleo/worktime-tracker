@@ -66,23 +66,32 @@ function calculateDailyStatsJS(bookings) {
         return { worked: '00:00', pause: '00:00', overtime: '00:00', netSeconds: 0, pauseSeconds: 0, overtimeSeconds: 0 };
     }
 
-    const sortedBookings = bookings.sort((a, b) => a.time.localeCompare(b.time));
+    const sortedBookings = bookings.sort((a, b) => {
+        if (a.timestamp_iso && b.timestamp_iso) {
+            return a.timestamp_iso.localeCompare(b.timestamp_iso);
+        }
+        return a.time.localeCompare(b.time);
+    });
 
-    const timeToSeconds = (timeStr) => {
-        const [hours, minutes] = timeStr.split(':').map(Number);
+    const getSecondsOfDay = (booking) => {
+        if (booking.timestamp_iso) {
+            const dt = new Date(booking.timestamp_iso);
+            return dt.getHours() * 3600 + dt.getMinutes() * 60 + dt.getSeconds();
+        }
+        const [hours, minutes] = booking.time.split(':').map(Number);
         return (hours * 3600) + (minutes * 60);
     };
 
-    const firstStampSeconds = timeToSeconds(sortedBookings[0].time);
-    const lastStampSeconds = timeToSeconds(sortedBookings[sortedBookings.length - 1].time);
+    const firstStampSeconds = getSecondsOfDay(sortedBookings[0]);
+    const lastStampSeconds = getSecondsOfDay(sortedBookings[sortedBookings.length - 1]);
 
     const gross_session_seconds = lastStampSeconds - firstStampSeconds;
 
     let manual_pause_seconds = 0;
     for (let i = 0; i < sortedBookings.length - 1; i++) {
         if (sortedBookings[i].action === 'out' && sortedBookings[i+1].action === 'in') {
-            const pause_start = timeToSeconds(sortedBookings[i].time);
-            const pause_end = timeToSeconds(sortedBookings[i+1].time);
+            const pause_start = getSecondsOfDay(sortedBookings[i]);
+            const pause_end = getSecondsOfDay(sortedBookings[i+1]);
             manual_pause_seconds += (pause_end - pause_start);
         }
     }
