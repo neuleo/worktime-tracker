@@ -64,7 +64,8 @@ function closeMenu() {
 // --- UI HANDLERS ---
 function togglePaolaButton() {
     appState.paolaButtonActive = !appState.paolaButtonActive;
-    loadTimeInfo();
+    render(); // Re-render the UI immediately with the new paola state
+    loadTimeInfo(); // Fetch updated data from the backend
 }
 
 function setActiveTab(tab) {
@@ -110,15 +111,17 @@ function handlePlannedDepartureChange(event) {
 
     const resultEl = document.getElementById('what-if-result');
 
-    if (!plannedTime || plannedTime.length < 5 || !appState.dayData || !appState.dayData.bookings) {
+    if (!plannedTime || plannedTime.length < 5 || !appState.dayData || !appState.dayData.bookings || appState.dayData.bookings.length === 0) {
         resultEl.innerHTML = '';
         return;
     }
 
     let tempBookings = JSON.parse(JSON.stringify(appState.dayData.bookings));
-    tempBookings.push({ action: 'out', time: plannedTime });
+    const todayDate = appState.dayData.date; // "YYYY-MM-DD"
+    const plannedTimestampIso = `${todayDate}T${plannedTime}:00`;
+    tempBookings.push({ action: 'out', time: plannedTime, timestamp_iso: plannedTimestampIso });
 
-    const stats = calculateDailyStatsJS(tempBookings);
+    const stats = calculateDailyStatsJS(tempBookings, { paola: appState.paolaButtonActive });
     const overtimeColor = getOvertimeColor(stats.overtime);
     resultEl.innerHTML = `
         <div class="text-center mt-4 p-4 bg-gray-50 rounded-lg">

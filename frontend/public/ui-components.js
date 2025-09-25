@@ -429,7 +429,7 @@ function renderTimeInfo() {
 }
 
 function renderWhatIfResult(plannedTime) {
-    if (!plannedTime || !appState.dayData || !appState.dayData.bookings) {
+    if (!plannedTime || !appState.dayData || !appState.dayData.bookings || appState.dayData.bookings.length === 0) {
         return '';
     }
 
@@ -437,9 +437,11 @@ function renderWhatIfResult(plannedTime) {
     let tempBookings = JSON.parse(JSON.stringify(appState.dayData.bookings));
 
     // Add the planned departure as a temporary 'out' booking
-    tempBookings.push({ action: 'out', time: plannedTime });
+    const todayDate = appState.dayData.date; // "YYYY-MM-DD"
+    const plannedTimestampIso = `${todayDate}T${plannedTime}:00`;
+    tempBookings.push({ action: 'out', time: plannedTime, timestamp_iso: plannedTimestampIso });
 
-    const stats = calculateDailyStatsJS(tempBookings);
+    const stats = calculateDailyStatsJS(tempBookings, { paola: appState.paolaButtonActive });
     const overtimeColor = getOvertimeColor(stats.overtime);
 
     return `

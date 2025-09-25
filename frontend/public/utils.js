@@ -61,16 +61,16 @@ function secondsToTimeStr(seconds) {
     return isNegative ? `-${timeStr}` : timeStr;
 }
 
-function calculateDailyStatsJS(bookings) {
+function calculateDailyStatsJS(bookings, options = {}) {
     if (!bookings || bookings.length === 0) {
         return { worked: '00:00', pause: '00:00', overtime: '00:00', netSeconds: 0, pauseSeconds: 0, overtimeSeconds: 0 };
     }
 
     const sortedBookings = bookings.sort((a, b) => {
-        if (a.timestamp_iso && b.timestamp_iso) {
-            return a.timestamp_iso.localeCompare(b.timestamp_iso);
-        }
-        return a.time.localeCompare(b.time);
+        // Always use timestamp_iso for sorting if available.
+        const timeA = a.timestamp_iso ? new Date(a.timestamp_iso) : new Date(`1970-01-01T${a.time || '00:00'}:00`);
+        const timeB = b.timestamp_iso ? new Date(b.timestamp_iso) : new Date(`1970-01-01T${b.time || '00:00'}:00`);
+        return timeA - timeB;
     });
 
     const getSecondsOfDay = (booking) => {
@@ -78,52 +78,72 @@ function calculateDailyStatsJS(bookings) {
             const dt = new Date(booking.timestamp_iso);
             return dt.getHours() * 3600 + dt.getMinutes() * 60 + dt.getSeconds();
         }
-        const [hours, minutes] = booking.time.split(':').map(Number);
+        // Fallback for legacy or incomplete data.
+        const [hours, minutes] = (booking.time || '00:00').split(':').map(Number);
         return (hours * 3600) + (minutes * 60);
     };
+
+    const cutoff_start_seconds = (6 * 3600) + (30 * 60); // 6:30
+    const cutoff_end_seconds = (18 * 3600) + (30 * 60); // 18:30
 
     const firstStampSeconds = getSecondsOfDay(sortedBookings[0]);
     const lastStampSeconds = getSecondsOfDay(sortedBookings[sortedBookings.length - 1]);
 
-    const gross_session_seconds = lastStampSeconds - firstStampSeconds;
+    const effective_first_stamp_seconds = Math.max(firstStampSeconds, cutoff_start_seconds);
+    const effective_last_stamp_seconds = Math.min(lastStampSeconds, cutoff_end_seconds);
+
+    // If the effective stamps create a negative duration, gross time is 0.
+    const gross_session_seconds = Math.max(0, effective_last_stamp_seconds - effective_first_stamp_seconds);
 
     let manual_pause_seconds = 0;
     for (let i = 0; i < sortedBookings.length - 1; i++) {
         if (sortedBookings[i].action === 'out' && sortedBookings[i+1].action === 'in') {
             const pause_start = getSecondsOfDay(sortedBookings[i]);
             const pause_end = getSecondsOfDay(sortedBookings[i+1]);
-            manual_pause_seconds += (pause_end - pause_start);
+            
+            const effective_pause_start = Math.max(pause_start, effective_first_stamp_seconds);
+            const effective_pause_end = Math.min(pause_end, effective_last_stamp_seconds);
+
+            if (effective_pause_end > effective_pause_start) {
+                manual_pause_seconds += (effective_pause_end - effective_pause_start);
+            }
         }
     }
 
-    // --- New Pause Calculation Logic ---
+    // --- Pause Calculation Logic ---
     let statutory_break_seconds = 0;
     const SIX_HOURS_IN_SECONDS = 6 * 3600;
     const SIX_HOURS_30_MIN_IN_SECONDS = 6.5 * 3600;
     const NINE_HOURS_IN_SECONDS = 9 * 3600;
     const NINE_HOURS_15_MIN_IN_SECONDS = 9.25 * 3600;
 
-    if (gross_session_seconds <= SIX_HOURS_IN_SECONDS) { // <= 6h
+    if (gross_session_seconds <= SIX_HOURS_IN_SECONDS) {
         statutory_break_seconds = 0;
-    } else if (gross_session_seconds > SIX_HOURS_IN_SECONDS && gross_session_seconds <= SIX_HOURS_30_MIN_IN_SECONDS) { // > 6h and <= 6h 30m
+    } else if (gross_session_seconds <= SIX_HOURS_30_MIN_IN_SECONDS) {
         statutory_break_seconds = gross_session_seconds - SIX_HOURS_IN_SECONDS;
-    } else if (gross_session_seconds > SIX_HOURS_30_MIN_IN_SECONDS && gross_session_seconds <= NINE_HOURS_IN_SECONDS) { // > 6h 30m and <= 9h
+    } else if (gross_session_seconds <= NINE_HOURS_IN_SECONDS) {
         statutory_break_seconds = 30 * 60;
-    } else if (gross_session_seconds > NINE_HOURS_IN_SECONDS && gross_session_seconds <= NINE_HOURS_15_MIN_IN_SECONDS) { // > 9h and <= 9h 15m
+    } else if (gross_session_seconds <= NINE_HOURS_15_MIN_IN_SECONDS) {
         statutory_break_seconds = (30 * 60) + (gross_session_seconds - NINE_HOURS_IN_SECONDS);
-    } else { // > 9h 15m
+    } else {
         statutory_break_seconds = 45 * 60;
     }
-    const total_deducted_pause_seconds = Math.max(manual_pause_seconds, statutory_break_seconds);
+
+    const paola_active = options.paola && manual_pause_seconds === 0;
+    let total_deducted_pause_seconds = Math.max(manual_pause_seconds, statutory_break_seconds);
+
+    if (paola_active) {
+        const paola_pause_seconds = 50 * 60;
+        total_deducted_pause_seconds = Math.max(total_deducted_pause_seconds, paola_pause_seconds);
+    }
     
     let net_work_seconds = gross_session_seconds - total_deducted_pause_seconds;
     net_work_seconds = Math.max(0, net_work_seconds);
 
-    // Cap worked time at 10 hours
     const TEN_HOURS_SECONDS = 10 * 3600;
     const capped_net_worked_seconds = Math.min(net_work_seconds, TEN_HOURS_SECONDS);
 
-    const TARGET_SECONDS = 7 * 3600 + 48 * 60; // 7h 48m
+    const TARGET_SECONDS = 7 * 3600 + 48 * 60;
     const overtime_seconds = capped_net_worked_seconds - TARGET_SECONDS;
 
     return {

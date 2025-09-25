@@ -19,3 +19,5 @@ Allerdings habe ich gleitzeit. Ich darf meine Pause auch ziehen. Für Pausen ste
 Alles, was ich länger Pause mache, als die bereits formulierten Regeln, wird oben draufgerechnet. wenn zb heute eigentlich 30 min Pause wären, ich aber 50 Minuten Pause mache, habe ich die Pause um 20 Minuten überzogen. Die Pausenzeit, die ich überzogen habe, muss ich dann aber länger arbeiten an diesem tag, sonst wird es einfach abgezogen
 
 DAS Problem ist gerade, das auf der Seite für heute 17:55 als Zeit angegeben ist, wo ich gehen kann. Wenn ich also um 18:30 gehen würde, wären das 0:35 überstunden. Er zeigt aber 34 an. Wenn ich als geh zeit 17:55 eintrage, rechnet er -00:01std überstunden
+
+Außerdem ist zu beachten, das vor 6:30 und nach 18:30 die Arbeitszeit quasi nicht gilt. Die Arbeitszeit wird erst ab 6:30 gerechnet und nach 18:30 nicht mehr weiter gerechnet. Wenn ich also um 6:25 starte, soll mit 6:30 gerechnet werden, da das die frühste start zeit ist, und wenn ich um 18:40 gehe, soll 18:30 als Endzeit genommen werden, da ab da die Arbeitszeit nicht mehr zählt

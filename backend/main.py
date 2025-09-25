@@ -269,17 +269,33 @@ def calculate_daily_stats(bookings: List[WorkSession], is_ongoing_day: bool) -> 
         return 0, 0, 0
 
     sorted_bookings = sorted(bookings, key=lambda x: x.timestamp)
+
+    day_date = ensure_berlin_tz(sorted_bookings[0].timestamp).date()
+    cutoff_start = datetime.combine(day_date, time(6, 30), tzinfo=BERLIN_TZ)
+    cutoff_end = datetime.combine(day_date, time(18, 30), tzinfo=BERLIN_TZ)
+
     first_stamp = ensure_berlin_tz(sorted_bookings[0].timestamp)
     last_stamp = get_berlin_now() if is_ongoing_day and sorted_bookings[-1].action == 'in' else ensure_berlin_tz(sorted_bookings[-1].timestamp)
 
-    gross_session_seconds = int((last_stamp - first_stamp).total_seconds())
+    effective_first_stamp = max(first_stamp, cutoff_start)
+    effective_last_stamp = min(last_stamp, cutoff_end)
+
+    if effective_first_stamp > effective_last_stamp:
+        effective_first_stamp = effective_last_stamp
+
+    gross_session_seconds = int((effective_last_stamp - effective_first_stamp).total_seconds())
 
     manual_pause_seconds = 0
     for i in range(len(sorted_bookings) - 1):
         if sorted_bookings[i].action == 'out' and sorted_bookings[i+1].action == 'in':
             pause_start = ensure_berlin_tz(sorted_bookings[i].timestamp)
             pause_end = ensure_berlin_tz(sorted_bookings[i+1].timestamp)
-            manual_pause_seconds += int((pause_end - pause_start).total_seconds())
+
+            effective_pause_start = max(pause_start, effective_first_stamp)
+            effective_pause_end = min(pause_end, effective_last_stamp)
+
+            if effective_pause_end > effective_pause_start:
+                manual_pause_seconds += int((effective_pause_end - effective_pause_start).total_seconds())
 
     net_worked_seconds, total_pause_seconds = _calculate_net_work_time_and_pause(gross_session_seconds, manual_pause_seconds)
 
