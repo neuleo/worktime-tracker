@@ -138,6 +138,10 @@ class OvertimeAdjustmentResponse(BaseModel):
     timestamp: str
     adjustment_seconds: int
 
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
 class AllDataResponse(BaseModel):
     work_sessions: List[WorkSessionResponse]
     overtime_adjustments: List[OvertimeAdjustmentResponse]
@@ -320,6 +324,18 @@ async def update_user_settings(settings: UserSettings, current_user: User = Depe
     current_user.work_end_time_str = settings.work_end_time_str
     db.commit(); db.refresh(current_user)
     return settings
+
+@api_router.post("/user/change-password")
+async def change_password(req: ChangePasswordRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Verify old password
+    if not verify_password(req.old_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Incorrect old password")
+    
+    # Hash and update new password
+    current_user.hashed_password = pwd_context.hash(req.new_password)
+    db.commit()
+    
+    return {"message": "Password updated successfully"}
 
 # --- Read Operations (can view other users) ---
 @api_router.get("/day/{date}", response_model=DayResponse)

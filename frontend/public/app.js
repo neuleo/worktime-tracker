@@ -197,6 +197,24 @@ function handleEditBookingSubmit(event) {
     updateBooking(id, date, action, time);
 }
 
+function handlePasswordChangeSubmit(event) {
+    event.preventDefault();
+    const oldPassword = document.getElementById('old-password').value;
+    const newPassword = document.getElementById('new-password').value;
+    const confirmPassword = document.getElementById('confirm-password').value;
+
+    if (newPassword !== confirmPassword) {
+        showNotification('Die neuen Passwörter stimmen nicht überein.', 'error');
+        return;
+    }
+    if (!newPassword) {
+        showNotification('Das neue Passwort darf nicht leer sein.', 'error');
+        return;
+    }
+
+    changePassword(oldPassword, newPassword);
+}
+
 // --- LIVE UPDATES ---
 function setupLiveUpdates() {
     if (timers.liveUpdate) clearInterval(timers.liveUpdate);

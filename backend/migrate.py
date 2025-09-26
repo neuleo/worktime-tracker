@@ -10,7 +10,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # --- CONFIGURATION (copied from main.py) ---
 DATABASE_URL = "sqlite:///./data/worktime.db"
-APP_PASSWORD = os.environ.get('APP_PASSWORD', 'password')
+APP_PASSWORD = os.environ.get('APP_PASSWORD', 'passwort')
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # --- DATABASE SETUP ---

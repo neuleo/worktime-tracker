@@ -291,3 +291,21 @@ async function adjustBookingTime(id, seconds) {
         showNotification(`Fehler: ${error.message}`, 'error');
     }
 }
+
+async function changePassword(oldPassword, newPassword) {
+    try {
+        const response = await apiCall('/user/change-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ old_password: oldPassword, new_password: newPassword })
+        });
+        if (!response.ok) throw new Error((await response.json()).detail || 'Failed to change password');
+        showNotification('Passwort erfolgreich geändert', 'success');
+        // Clear form
+        document.getElementById('old-password').value = '';
+        document.getElementById('new-password').value = '';
+        document.getElementById('confirm-password').value = '';
+    } catch (error) {
+        showNotification(`Fehler: ${error.message}`, 'error');
+    }
+}

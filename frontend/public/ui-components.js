@@ -35,9 +35,10 @@ function renderSettingsPage() {
 
     return `
         <div class="space-y-6">
+            <!-- Work Time Settings -->
             <div class="bg-white rounded-xl shadow-sm border">
                 <div class="p-6 border-b">
-                    <h2 class="text-lg font-bold text-gray-900">Einstellungen für ${activeUser}</h2>
+                    <h2 class="text-lg font-bold text-gray-900">Arbeitszeit-Einstellungen für ${activeUser}</h2>
                     <p class="text-sm text-gray-600 mt-1">Passe die Arbeitszeitregeln an.</p>
                 </div>
                 
@@ -77,6 +78,7 @@ function renderSettingsPage() {
                             id="setting-end-time" 
                             value="${settings.work_end_time_str}"
                             class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            ${!isOwnSettings ? 'disabled' : ''}
                         >
                     </div>
 
@@ -92,6 +94,34 @@ function renderSettingsPage() {
                             <p class="text-sm text-yellow-800">
                                 Du kannst nur deine eigenen Einstellungen bearbeiten.
                             </p>
+                        </div>
+                    `}
+                </form>
+            </div>
+
+            <!-- Password Settings -->
+            <div class="bg-white rounded-xl shadow-sm border">
+                <div class="p-6 border-b">
+                    <h2 class="text-lg font-bold text-gray-900">Passwort ändern</h2>
+                </div>
+                <form onsubmit="handlePasswordChangeSubmit(event)" class="p-6 space-y-4">
+                    <div>
+                        <label for="old-password" class="block text-sm font-medium text-gray-700 mb-2">Altes Passwort</label>
+                        <input type="password" id="old-password" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" ${!isOwnSettings ? 'disabled' : ''} required>
+                    </div>
+                    <div>
+                        <label for="new-password" class="block text-sm font-medium text-gray-700 mb-2">Neues Passwort</label>
+                        <input type="password" id="new-password" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" ${!isOwnSettings ? 'disabled' : ''} required>
+                    </div>
+                    <div>
+                        <label for="confirm-password" class="block text-sm font-medium text-gray-700 mb-2">Neues Passwort bestätigen</label>
+                        <input type="password" id="confirm-password" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" ${!isOwnSettings ? 'disabled' : ''} required>
+                    </div>
+                    ${isOwnSettings ? `
+                        <button type="submit" class="w-full py-3 px-4 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition-colors">Passwort speichern</button>
+                    ` : `
+                        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                            <p class="text-sm text-yellow-800">Du kannst nur dein eigenes Passwort ändern.</p>
                         </div>
                     `}
                 </form>
