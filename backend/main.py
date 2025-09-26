@@ -620,6 +620,26 @@ async def login(res: Response, data: LoginRequest, db: Session = Depends(get_db)
 @app.get("/api/logout")
 async def logout(res: Response): res.delete_cookie(COOKIE_NAME); return RedirectResponse(url="/login.html")
 
+@app.post("/api/webhook/stamp/{user_name}/{secret}")
+async def webhook_stamp(user_name: str, secret: str, db: Session = Depends(get_db)):
+    if secret != STAMP_WEBHOOK_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid secret")
+
+    user = db.query(User).filter(User.name == user_name).first()
+    if not user:
+        raise HTTPException(status_code=404, detail=f"Webhook user '{user_name}' not found")
+
+    current_time = get_berlin_now()
+    # Check the most recent booking for this user, regardless of date
+    last_booking = db.query(WorkSession).filter(WorkSession.user_id == user.id).order_by(desc(WorkSession.timestamp)).first()
+    new_action = "out" if last_booking and last_booking.action == "in" else "in"
+    
+    db.add(WorkSession(user_id=user.id, timestamp=current_time, action=new_action))
+    db.commit()
+    
+    return {"status": new_action, "user": user.name, "timestamp": current_time.isoformat()}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
