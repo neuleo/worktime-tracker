@@ -1,9 +1,9 @@
 // App Logic and Event Handlers
 
 // --- ROUTER ---
-const routes = ['dashboard', 'sessions', 'timeinfo', 'manual', 'flextime', 'stats'];
+const routes = ['dashboard', 'sessions', 'timeinfo', 'manual', 'flextime', 'stats', 'settings'];
 
-function router() {
+async function router() {
     const page = window.location.hash.substring(1) || 'dashboard';
     
     if (!routes.includes(page)) {
@@ -26,14 +26,16 @@ function router() {
     
     // Load data for specific pages and set up live updates
     if (page === 'sessions') {
-        loadSessions();
+        await loadSessions();
     } else if (page === 'timeinfo') {
-        loadTimeInfo(); // Initial load
+        await loadTimeInfo(); // Initial load
         setupTimeInfoLiveUpdates(); // Start periodic updates
     } else if (page === 'flextime') {
-        loadOvertimeData();
+        await loadOvertimeData();
     } else if (page === 'stats') {
         // Data is loaded by renderCharts in statistics.js
+    } else if (page === 'settings') {
+        await loadUserSettings();
     } else if (page === 'dashboard') {
         // Dashboard data is loaded by init and periodic refresh, live updates are handled by setupLiveUpdates
         // Ensure live updates are running if we navigate here
@@ -45,6 +47,23 @@ function router() {
 
 function navigateTo(page) {
     window.location.hash = page;
+}
+
+async function switchActiveUser(username) {
+    console.log(`Switching active user to: ${username}`);
+    appState.activeUser = username;
+    localStorage.setItem('activeUser', username);
+
+    // Reload all data for the new user
+    await Promise.all([
+        loadStatus(),
+        loadTodayData(),
+        loadWeekData(),
+        // Add other data loads if they should refresh on user switch
+    ]);
+
+    // Re-route to the current page to force a full re-render with new data
+    router();
 }
 
 
@@ -103,6 +122,24 @@ function handleOvertimeSubmit(event) {
 
     adjustOvertime(hours);
     closeOvertimeModal();
+}
+
+function handleSettingsSubmit(event) {
+    event.preventDefault();
+    const targetHours = document.getElementById('setting-target-hours').value;
+    const startTime = document.getElementById('setting-start-time').value;
+    const endTime = document.getElementById('setting-end-time').value;
+
+    const [h, m] = targetHours.split(':').map(Number);
+    const targetSeconds = h * 3600 + m * 60;
+
+    const newSettings = {
+        target_work_seconds: targetSeconds,
+        work_start_time_str: startTime,
+        work_end_time_str: endTime
+    };
+
+    saveUserSettings(newSettings);
 }
 
 function handlePlannedDepartureChange(event) {
@@ -237,6 +274,9 @@ function render() {
         case 'stats':
             pageContent = renderStatisticsPage();
             break;
+        case 'settings':
+            pageContent = renderSettingsPage();
+            break;
         default:
             pageContent = renderDashboard();
     }
@@ -269,8 +309,13 @@ function render() {
         </div>
     `;
 
+    // Render dynamic parts after main render
     if (currentPage === 'stats') {
         setTimeout(renderCharts, 0); // Use setTimeout to ensure DOM is updated
+    }
+    const userSwitcherContainer = document.getElementById('user-switcher-container');
+    if (userSwitcherContainer) {
+        userSwitcherContainer.innerHTML = renderUserSwitcher();
     }
 }
 
@@ -281,7 +326,8 @@ function getPageTitle(page) {
         'timeinfo': 'Info',
         'manual': 'Buchung',
         'flextime': 'Gleitzeit',
-        'stats': 'Statistik'
+        'stats': 'Statistik',
+        'settings': 'Einstellungen'
     };
     return titles[page] || 'Arbeitszeit';
 }
@@ -313,7 +359,7 @@ function setupEventListeners() {
         if (e.key === 'Escape') {
             closeMenu();
         }
-        if (e.key === ' ' && appState.currentPage === 'dashboard') {
+        if (e.key === ' ' && appState.currentPage === 'dashboard' && appState.loggedInUser === appState.activeUser) {
             e.preventDefault();
             handleStamp();
         }
@@ -321,12 +367,27 @@ function setupEventListeners() {
 }
 
 // --- INITIALIZE APP ---
-function init() {
+async function init() {
     console.log('🚀 Arbeitszeit Tracker starting...');
     
     appState.isOnline = navigator.onLine;
     
     setupEventListeners();
+
+    // Check if user is logged in
+    if (!appState.loggedInUser) {
+        window.location.href = '/login.html';
+        return;
+    }
+
+    // Set active user if not set
+    if (!appState.activeUser) {
+        appState.activeUser = appState.loggedInUser;
+        localStorage.setItem('activeUser', appState.activeUser);
+    }
+    
+    // Load initial data
+    await loadUsers(); // Load all users for the switcher
     
     Promise.all([
         loadStatus(),
@@ -358,8 +419,12 @@ document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
         if (appState.isOnline) {
             console.log('📱 Page visible - refreshing data');
-            loadStatus();
-            router(); // Re-run router logic to refresh data for current page
+            // Reload data for the current active user
+            Promise.all([
+                loadStatus(),
+                loadTodayData(),
+                loadWeekData()
+            ]).then(() => router());
         }
     } else {
         if (timers.liveUpdate) clearInterval(timers.liveUpdate);

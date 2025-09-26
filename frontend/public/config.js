@@ -1,7 +1,6 @@
 // App Configuration
 const CONFIG = {
     API_BASE: '/api',
-    USER: 'leon',
     CACHE_BUSTER_ENABLED: true,
     LIVE_UPDATE_INTERVAL: 1000, // 1 second
     CLOCK_UPDATE_INTERVAL: 1000, // 1 second
@@ -20,13 +19,18 @@ let appState = {
     sessions: [],
     timeInfo: null,
     overtimeData: null,
+    settings: null, // For the settings page
     isLoading: false,
     currentTime: new Date(),
     isOnline: navigator.onLine,
     activeTab: 'today',
     currentPage: 'dashboard',
     plannedDepartureTime: '',
-    paolaButtonActive: false
+    paolaButtonActive: false,
+    // Multi-user state
+    loggedInUser: localStorage.getItem('loggedInUser') || null,
+    activeUser: localStorage.getItem('activeUser') || null,
+    allUsers: []
 };
 
 // Timer management

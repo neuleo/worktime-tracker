@@ -1,5 +1,5 @@
-const CACHE_NAME = 'arbeitszeit-v3';
-const STATIC_CACHE = 'arbeitszeit-static-v3';
+const CACHE_NAME = 'arbeitszeit-v4';
+const STATIC_CACHE = 'arbeitszeit-static-v4';
 
 // Files to cache (excluding HTML files completely)
 const STATIC_FILES = [

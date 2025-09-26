@@ -1,8 +1,112 @@
+function renderUserSwitcher() {
+    const { allUsers, activeUser, loggedInUser } = appState;
+
+    if (allUsers.length <= 1) {
+        return '';
+    }
+
+    return `
+        <div>
+            <label for="user-switcher" class="block text-sm font-medium text-blue-200 mb-1">Aktiver Benutzer</label>
+            <select 
+                id="user-switcher" 
+                onchange="switchActiveUser(this.value)"
+                class="w-full bg-blue-700 border-blue-500 text-white rounded-md shadow-sm text-base focus:ring-blue-400 focus:border-blue-400"
+            >
+                ${allUsers.map(user => `
+                    <option value="${user}" ${user === activeUser ? 'selected' : ''}>
+                        ${user} ${user === loggedInUser ? ' (Ich)' : ''}
+                    </option>
+                `).join('')}
+            </select>
+        </div>
+    `;
+}
+
+function renderSettingsPage() {
+    const { settings, activeUser, loggedInUser } = appState;
+
+    if (!settings) {
+        return renderLoadingState();
+    }
+
+    const isOwnSettings = activeUser === loggedInUser;
+    const targetHours = secondsToTimeStr(settings.target_work_seconds);
+
+    return `
+        <div class="space-y-6">
+            <div class="bg-white rounded-xl shadow-sm border">
+                <div class="p-6 border-b">
+                    <h2 class="text-lg font-bold text-gray-900">Einstellungen für ${activeUser}</h2>
+                    <p class="text-sm text-gray-600 mt-1">Passe die Arbeitszeitregeln an.</p>
+                </div>
+                
+                <form onsubmit="handleSettingsSubmit(event)" class="p-6 space-y-4">
+                    <div>
+                        <label for="setting-target-hours" class="block text-sm font-medium text-gray-700 mb-2">
+                            Tägliche Soll-Arbeitszeit
+                        </label>
+                        <input 
+                            type="time" 
+                            id="setting-target-hours" 
+                            value="${targetHours}"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            ${!isOwnSettings ? 'disabled' : ''}
+                        >
+                    </div>
+
+                    <div>
+                        <label for="setting-start-time" class="block text-sm font-medium text-gray-700 mb-2">
+                            Arbeitsbeginn (Cutoff)
+                        </label>
+                        <input 
+                            type="time" 
+                            id="setting-start-time" 
+                            value="${settings.work_start_time_str}"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            ${!isOwnSettings ? 'disabled' : ''}
+                        >
+                    </div>
+
+                    <div>
+                        <label for="setting-end-time" class="block text-sm font-medium text-gray-700 mb-2">
+                            Arbeitsende (Cutoff)
+                        </label>
+                        <input 
+                            type="time" 
+                            id="setting-end-time" 
+                            value="${settings.work_end_time_str}"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        >
+                    </div>
+
+                    ${isOwnSettings ? `
+                        <button 
+                            type="submit"
+                            class="w-full py-3 px-4 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition-colors"
+                        >
+                            Einstellungen speichern
+                        </button>
+                    ` : `
+                        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                            <p class="text-sm text-yellow-800">
+                                Du kannst nur deine eigenen Einstellungen bearbeiten.
+                            </p>
+                        </div>
+                    `}
+                </form>
+            </div>
+        </div>
+    `;
+}
+
 // UI Components and Render Functions
 
 function renderDashboard() {
-    const { status, dayData, weekData, isLoading, currentTime, isOnline, activeTab } = appState;
+    const { status, dayData, weekData, isLoading, currentTime, isOnline, activeTab, activeUser, loggedInUser } = appState;
     
+    const canStamp = activeUser === loggedInUser;
+
     return `
         <div class="space-y-6">
             <!-- Status Card -->
@@ -30,16 +134,17 @@ function renderDashboard() {
 
                     <button 
                         onclick="handleStamp()" 
-                        ${isLoading || !isOnline ? 'disabled' : ''}
+                        ${isLoading || !isOnline || !canStamp ? 'disabled' : ''}
                         class="w-full py-4 px-6 rounded-xl font-semibold text-lg transition-all ${
                             status.status === 'in'
                                 ? 'bg-red-500 hover:bg-red-600 text-white shadow-lg hover:shadow-xl'
                                 : 'bg-blue-500 hover:bg-blue-600 text-white shadow-lg hover:shadow-xl'
-                        } ${isLoading || !isOnline ? 'opacity-50 cursor-not-allowed' : ''}"
+                        } ${isLoading || !isOnline || !canStamp ? 'opacity-50 cursor-not-allowed' : ''}"
                     >
                         ${isLoading ? '...' : status.status === 'in' ? 'Ausstempeln' : 'Einstempeln'}
                     </button>
 
+                    ${!canStamp ? '<p class="text-sm text-yellow-600 mt-2">Stempeln nur für eingeloggten Benutzer.</p>' : ''}
                     ${!isOnline ? '<p class="text-sm text-red-500">Offline - Keine Verbindung</p>' : ''}
                 </div>
             </div>
@@ -49,7 +154,7 @@ function renderDashboard() {
                 <div class="flex">
                     <button
                         onclick="setActiveTab('today')"
-                        class="flex-1 py-3 px-4 text-sm font-medium transition-colors ${
+                        class="flex-1 py-3 px-4 text-sm font-medium transition-colors ${ 
                             activeTab === 'today'
                                 ? 'bg-blue-50 text-blue-600 border-b-2 border-blue-600'
                                 : 'text-gray-500 hover:text-gray-700'
@@ -60,7 +165,7 @@ function renderDashboard() {
                     </button>
                     <button
                         onclick="setActiveTab('week')"
-                        class="flex-1 py-3 px-4 text-sm font-medium transition-colors ${
+                        class="flex-1 py-3 px-4 text-sm font-medium transition-colors ${ 
                             activeTab === 'week'
                                 ? 'bg-blue-50 text-blue-600 border-b-2 border-blue-600'
                                 : 'text-gray-500 hover:text-gray-700'
@@ -212,7 +317,7 @@ function renderSessions() {
             <div class="bg-white rounded-xl shadow-sm border">
                 <div class="p-6 border-b">
                     <h2 class="text-lg font-bold text-gray-900">Alle Buchungen</h2>
-                    <p class="text-sm text-gray-600 mt-1">Übersicht aller Buchungen</p>
+                    <p class="text-sm text-gray-600 mt-1">Übersicht aller Buchungen für ${appState.activeUser}</p>
                 </div>
                 
                 <div class="max-h-96 overflow-y-auto scrollbar-hide">
@@ -346,6 +451,7 @@ function renderBookingItem(booking) {
     const actionText = booking.action === 'in' ? 'Gekommen' : 'Gegangen';
     const actionColor = booking.action === 'in' ? 'text-green-600' : 'text-red-600';
     const dotColor = booking.action === 'in' ? 'bg-green-500' : 'bg-red-500';
+    const canEdit = appState.activeUser === appState.loggedInUser;
     
     return `
         <div class="p-4 hover:bg-gray-50 transition-colors">
@@ -359,6 +465,7 @@ function renderBookingItem(booking) {
                         </div>
                     </div>
                 </div>
+                ${canEdit ? `
                 <div class="flex items-center space-x-2">
                     <button onclick="openEditBookingModal('${booking.id}', '${booking.action}', '${booking.time}', '${booking.timestamp_iso.split('T')[0]}')" class="p-2 text-gray-500 hover:text-blue-600 hover:bg-gray-100 rounded-full" title="Bearbeiten">
                         ${createIcon('edit', 'h-4 w-4')}
@@ -373,6 +480,7 @@ function renderBookingItem(booking) {
                         ${createIcon('trash', 'h-4 w-4')}
                     </button>
                 </div>
+                ` : ''}
             </div>
         </div>
     `;
@@ -477,7 +585,7 @@ function renderEstimatedEndTime(estimatedEndTime) {
                 <span class="font-medium text-green-900">Voraussichtliches Ende</span>
             </div>
             <div class="text-2xl font-bold text-green-700 font-mono">${estimatedEndTime}</div>
-            <div class="text-sm text-green-600 mt-1">Um 7h48min zu erreichen</div>
+            <div class="text-sm text-green-600 mt-1">Um Soll-Arbeitszeit zu erreichen</div>
         </div>
     `;
 }
@@ -543,16 +651,17 @@ function renderPauseRulesInfo() {
 
 function renderManualBooking() {
     const today = new Date().toISOString().split('T')[0];
+    const canEdit = appState.activeUser === appState.loggedInUser;
     
     return `
         <div class="space-y-6">
             <div class="bg-white rounded-xl shadow-sm border">
                 <div class="p-6 border-b">
                     <h2 class="text-lg font-bold text-gray-900">Manuelle Buchung</h2>
-                    <p class="text-sm text-gray-600 mt-1">Einzelne Buchung nachträglich eintragen</p>
+                    <p class="text-sm text-gray-600 mt-1">Einzelne Buchung für ${appState.activeUser} nachtragen</p>
                 </div>
                 
-                ${renderManualBookingForm(today)}
+                ${renderManualBookingForm(today, canEdit)}
             </div>
 
             ${renderManualBookingInfo()}
@@ -560,7 +669,7 @@ function renderManualBooking() {
     `;
 }
 
-function renderManualBookingForm(today) {
+function renderManualBookingForm(today, canEdit) {
     return `
         <form onsubmit="handleManualSubmit(event)" class="p-6 space-y-4">
             <div>
@@ -573,6 +682,7 @@ function renderManualBookingForm(today) {
                     value="${today}"
                     class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     max="${today}"
+                    ${!canEdit ? 'disabled' : ''}
                 >
             </div>
 
@@ -583,6 +693,7 @@ function renderManualBookingForm(today) {
                 <select 
                     id="manual-action" 
                     class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    ${!canEdit ? 'disabled' : ''}
                 >
                     <option value="in">Kommen (Einstempeln)</option>
                     <option value="out">Gehen (Ausstempeln)</option>
@@ -597,30 +708,24 @@ function renderManualBookingForm(today) {
                     type="time" 
                     id="manual-time" 
                     class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    ${!canEdit ? 'disabled' : ''}
                 >
             </div>
 
-            <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                <div class="flex items-start space-x-2">
-                    <svg class="h-5 w-5 text-yellow-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.728-.833-2.498 0L4.316 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
-                    </svg>
-                    <div class="text-sm">
-                        <div class="font-medium text-yellow-900 mb-1">Hinweis</div>
-                        <div class="text-yellow-800">
-                            Einzelne Buchung für Kommen oder Gehen. 
-                            Pausen werden automatisch nach den gesetzlichen Regelungen berechnet.
-                        </div>
-                    </div>
+            ${canEdit ? `
+                <button 
+                    type="submit"
+                    class="w-full py-3 px-4 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition-colors"
+                >
+                    Buchung erstellen
+                </button>
+            ` : `
+                <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                    <p class="text-sm text-yellow-800">
+                        Manuelle Buchungen sind nur für den eingeloggten Benutzer möglich.
+                    </p>
                 </div>
-            </div>
-
-            <button 
-                type="submit"
-                class="w-full py-3 px-4 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition-colors"
-            >
-                Buchung erstellen
-            </button>
+            `}
         </form>
     `;
 }
@@ -633,8 +738,7 @@ function renderManualBookingInfo() {
                 <li>• Bis 6h Anwesenheit: Keine Pause</li>
                 <li>• 6h bis 9h Anwesenheit: 30min Pause</li>
                 <li>• Über 9h Anwesenheit: 45min Pause</li>
-                <li>• Zielarbeitszeit: 7h 48min pro Tag</li>
-                <li>• Maximum: 10h Anwesenheit pro Tag</li>
+                <li>• Maximum: 10h Netto-Arbeitszeit pro Tag</li>
             </ul>
         </div>
     `;
@@ -648,16 +752,19 @@ function renderFlextimePage() {
     }
 
     const overtimeColor = getOvertimeColor(overtimeData.total_overtime_str);
+    const canEdit = appState.activeUser === appState.loggedInUser;
 
     return `
         <div class="space-y-6">
             <!-- Overtime Status -->
             <div class="bg-white rounded-xl shadow-sm border p-6 relative">
                 <div class="flex justify-between items-start">
-                    <h2 class="text-lg font-bold text-gray-900 mb-4">Gleitzeit-Übersicht</h2>
+                    <h2 class="text-lg font-bold text-gray-900 mb-4">Gleitzeit-Übersicht für ${appState.activeUser}</h2>
+                    ${canEdit ? `
                     <button onclick="openOvertimeModal()" class="p-2 text-gray-500 hover:bg-gray-100 rounded-full">
                         ${createIcon('settings', 'h-5 w-5')}
                     </button>
+                    ` : ''}
                 </div>
                 <div class="text-center space-y-4">
                     <div>
