@@ -63,7 +63,7 @@ function secondsToTimeStr(seconds) {
     return isNegative ? `-${timeStr}` : timeStr;
 }
 
-function calculateDailyStatsJS(bookings, options = {}) {
+function calculateDailyStatsJS(bookings, targetSeconds, options = {}) {
     if (!bookings || bookings.length === 0) {
         return { worked: '00:00', pause: '00:00', overtime: '00:00', netSeconds: 0, pauseSeconds: 0, overtimeSeconds: 0 };
     }
@@ -145,8 +145,7 @@ function calculateDailyStatsJS(bookings, options = {}) {
     const TEN_HOURS_SECONDS = 10 * 3600;
     const capped_net_worked_seconds = Math.min(net_work_seconds, TEN_HOURS_SECONDS);
 
-    const TARGET_SECONDS = 7 * 3600 + 48 * 60;
-    const overtime_seconds = capped_net_worked_seconds - TARGET_SECONDS;
+    const overtime_seconds = capped_net_worked_seconds - targetSeconds;
 
     return {
         worked: secondsToTimeStr(capped_net_worked_seconds),

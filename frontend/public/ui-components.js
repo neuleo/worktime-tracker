@@ -427,7 +427,7 @@ function renderBookingsByDate(date) {
     });
 
     // Calculate daily overtime for this date
-    const dayOvertimeData = calculateDailyStatsJS(dayBookings);
+    const dayOvertimeData = calculateDailyStatsJS(dayBookings, appState.settings.target_work_seconds);
     
     return `
         <div class="border-b last:border-b-0">

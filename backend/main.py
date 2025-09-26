@@ -405,7 +405,7 @@ async def get_time_info(paola: bool = False, user: User = Depends(get_user_to_vi
             manual_pause_seconds += int((pause_end - pause_start).total_seconds())
 
     current_gross_seconds = (current_time - ensure_berlin_tz(first_stamp_today.timestamp)).total_seconds()
-    current_net_seconds, _ = _calculate_net_work_time_and_pause(current_gross_seconds, manual_pause_seconds) # Pass the actual manual pause
+    current_net_seconds, _ = _calculate_net_work_time_and_pause(current_gross_seconds, manual_pause_seconds)
 
     time_remaining_seconds = max(0, user.target_work_seconds - current_net_seconds)
 
@@ -420,14 +420,14 @@ async def get_time_info(paola: bool = False, user: User = Depends(get_user_to_vi
 
         # Iteratively refine the estimate to account for statutory breaks
         for _ in range(5): # 5 iterations are more than enough to converge
-            future_gross_seconds = (estimated_end - ensure_berlin_tz(first_stamp_today.timestamp)).total_seconds() - manual_pause_seconds
+            future_gross_seconds = (estimated_end - ensure_berlin_tz(first_stamp_today.timestamp)).total_seconds()
             future_statutory_break = _calculate_statutory_break_for_prediction(future_gross_seconds)
             
-            # If Paola button is active, the break is at least 50 minutes
             if paola:
                 future_statutory_break = max(future_statutory_break, 50 * 60)
 
-            future_net_seconds = future_gross_seconds - future_statutory_break
+            total_future_pause = max(manual_pause_seconds, future_statutory_break)
+            future_net_seconds = future_gross_seconds - total_future_pause
             
             error_seconds = future_net_seconds - target_net_seconds
             if abs(error_seconds) < 1: # Close enough

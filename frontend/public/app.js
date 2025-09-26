@@ -26,7 +26,7 @@ async function router() {
     
     // Load data for specific pages and set up live updates
     if (page === 'sessions') {
-        await loadSessions();
+        await Promise.all([loadSessions(), loadUserSettings()]);
     } else if (page === 'timeinfo') {
         await loadTimeInfo(); // Initial load
         setupTimeInfoLiveUpdates(); // Start periodic updates
@@ -158,7 +158,7 @@ function handlePlannedDepartureChange(event) {
     const plannedTimestampIso = `${todayDate}T${plannedTime}:00`;
     tempBookings.push({ action: 'out', time: plannedTime, timestamp_iso: plannedTimestampIso });
 
-    const stats = calculateDailyStatsJS(tempBookings, { paola: appState.paolaButtonActive });
+    const stats = calculateDailyStatsJS(tempBookings, appState.settings.target_work_seconds, { paola: appState.paolaButtonActive });
     const overtimeColor = getOvertimeColor(stats.overtime);
     resultEl.innerHTML = `
         <div class="text-center mt-4 p-4 bg-gray-50 rounded-lg">
