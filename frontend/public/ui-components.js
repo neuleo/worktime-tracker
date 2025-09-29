@@ -102,6 +102,29 @@ function renderSettingsPage() {
                         </label>
                     </div>
 
+                    <div>
+                        <label for="setting-time-offset" class="block text-sm font-medium text-gray-700 mb-2">
+                            Zeit-Offset (in Sekunden)
+                        </label>
+                        <div class="flex items-center space-x-2">
+                            <input 
+                                type="number" 
+                                id="setting-time-offset" 
+                                value="${settings.time_offset_seconds}"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                ${!isOwnSettings ? 'disabled' : ''}
+                            >
+                            <button 
+                                type="button"
+                                onclick="handleSyncTime()"
+                                class="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition-colors"
+                                ${!isOwnSettings ? 'disabled' : ''}
+                            >
+                                Sync
+                            </button>
+                        </div>
+                    </div>
+
                     ${isOwnSettings ? `
                         <button 
                             type="submit"

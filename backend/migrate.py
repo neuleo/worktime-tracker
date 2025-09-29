@@ -53,6 +53,11 @@ def run_migration():
                 connection.execute(text('ALTER TABLE users ADD COLUMN paola_pause_enabled BOOLEAN'))
                 connection.execute(text('UPDATE users SET paola_pause_enabled = TRUE'))
 
+            if 'time_offset_seconds' not in columns:
+                print("Adding column: time_offset_seconds")
+                connection.execute(text('ALTER TABLE users ADD COLUMN time_offset_seconds INTEGER'))
+                connection.execute(text('UPDATE users SET time_offset_seconds = 0'))
+
             # Use a session to update data
             with SessionLocal() as db:
                 # 2. Update existing 'leon' user
@@ -77,8 +82,8 @@ def run_migration():
                     print("Creating user 'paola'...")
                     hashed_password = pwd_context.hash(APP_PASSWORD) # Using same default password
                     db.execute(text("""
-                        INSERT INTO users (name, hashed_password, target_work_seconds, work_start_time_str, work_end_time_str, short_break_logic_enabled, paola_pause_enabled)
-                        VALUES ('paola', :hashed_password, 28800, '08:00', '18:00', TRUE, TRUE)
+                        INSERT INTO users (name, hashed_password, target_work_seconds, work_start_time_str, work_end_time_str, short_break_logic_enabled, paola_pause_enabled, time_offset_seconds)
+                        VALUES ('paola', :hashed_password, 28800, '08:00', '18:00', TRUE, TRUE, 0)
                     """), {'hashed_password': hashed_password})
                     print("User 'paola' created.")
                 

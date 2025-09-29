@@ -59,7 +59,7 @@ async function switchActiveUser(username) {
         loadStatus(),
         loadTodayData(),
         loadWeekData(),
-        // Add other data loads if they should refresh on user switch
+        loadUserSettings()
     ]);
 
     // Re-route to the current page to force a full re-render with new data
@@ -178,6 +178,7 @@ function handleSettingsSubmit(event) {
     const endTime = document.getElementById('setting-end-time').value;
     const shortBreakLogic = document.getElementById('setting-short-break-logic').checked;
     const paolaPause = document.getElementById('setting-paola-pause').checked;
+    const timeOffset = parseInt(document.getElementById('setting-time-offset').value, 10) || 0;
 
     const [h, m] = targetHours.split(':').map(Number);
     const targetSeconds = h * 3600 + m * 60;
@@ -187,7 +188,8 @@ function handleSettingsSubmit(event) {
         work_start_time_str: startTime,
         work_end_time_str: endTime,
         short_break_logic_enabled: shortBreakLogic,
-        paola_pause_enabled: paolaPause
+        paola_pause_enabled: paolaPause,
+        time_offset_seconds: timeOffset
     };
 
     saveUserSettings(newSettings);
@@ -270,6 +272,29 @@ function handlePasswordChangeSubmit(event) {
     changePassword(oldPassword, newPassword);
 }
 
+function handleSyncTime() {
+    const offsetInput = document.getElementById('setting-time-offset');
+    const targetSeconds = parseInt(offsetInput.value, 10);
+
+    if (isNaN(targetSeconds) || targetSeconds < 0 || targetSeconds > 59) {
+        showNotification('Bitte eine Sekunde zwischen 0 und 59 eingeben', 'error');
+        return;
+    }
+
+    const now = new Date();
+    const currentSeconds = now.getSeconds();
+    
+    // Calculate the difference
+    let offset = targetSeconds - currentSeconds;
+
+    // Update the input field with the new offset
+    offsetInput.value = offset;
+
+    // Trigger the form submission to save all settings
+    handleSettingsSubmit(new Event('submit'));
+    showNotification(`Zeit-Offset auf ${offset}s gesetzt und gespeichert`, 'success');
+}
+
 // --- LIVE UPDATES ---
 function setupLiveUpdates() {
     if (timers.liveUpdate) clearInterval(timers.liveUpdate);
@@ -314,7 +339,8 @@ function pauseTimeInfoUpdates() {
 function startClock() {
     if (timers.clock) clearInterval(timers.clock);
     timers.clock = setInterval(() => {
-        appState.currentTime = new Date();
+        const offset = appState.settings?.time_offset_seconds || 0;
+        appState.currentTime = new Date(new Date().getTime() + offset * 1000);
         const timeEl = document.querySelector('.current-time-display');
         if (timeEl) {
             timeEl.textContent = formatTime(appState.currentTime);
@@ -465,7 +491,8 @@ async function init() {
     Promise.all([
         loadStatus(),
         loadTodayData(),
-        loadWeekData()
+        loadWeekData(),
+        loadUserSettings()
     ]).then(() => {
         console.log('✅ Initial data loaded');
         router(); // Initial route handling

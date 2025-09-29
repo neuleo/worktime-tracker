@@ -46,6 +46,7 @@ class User(Base):
     work_end_time_str = Column(String, default="18:30", nullable=False)
     short_break_logic_enabled = Column(Boolean, default=True, nullable=False)
     paola_pause_enabled = Column(Boolean, default=True, nullable=False)
+    time_offset_seconds = Column(Integer, default=0, nullable=False)
 
     work_sessions = relationship("WorkSession", back_populates="user", cascade="all, delete-orphan")
     overtime_adjustments = relationship("OvertimeAdjustment", back_populates="user", cascade="all, delete-orphan")
@@ -160,6 +161,7 @@ class UserSettings(BaseModel):
     work_end_time_str: str
     short_break_logic_enabled: bool
     paola_pause_enabled: bool
+    time_offset_seconds: int
 
 # --- HELPER & UTILITY FUNCTIONS ---
 def get_berlin_now(): return datetime.now(BERLIN_TZ)
@@ -363,6 +365,7 @@ async def update_user_settings(settings: UserSettings, current_user: User = Depe
     current_user.work_end_time_str = settings.work_end_time_str
     current_user.short_break_logic_enabled = settings.short_break_logic_enabled
     current_user.paola_pause_enabled = settings.paola_pause_enabled
+    current_user.time_offset_seconds = settings.time_offset_seconds
     db.commit(); db.refresh(current_user)
     return settings
 
@@ -651,6 +654,8 @@ async def get_user_settings(user: User = Depends(get_user_to_view)):
         user_data['short_break_logic_enabled'] = True
     if user_data.get('paola_pause_enabled') is None:
         user_data['paola_pause_enabled'] = True
+    if user_data.get('time_offset_seconds') is None:
+        user_data['time_offset_seconds'] = 0
     return UserSettings.model_validate(user_data)
 
 # --- MAIN APP SETUP ---
