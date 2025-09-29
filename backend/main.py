@@ -114,6 +114,7 @@ class TimeInfoResponse(BaseModel):
     time_worked_today: str
     time_remaining: str
     manual_pause_seconds: int
+    work_interruption_seconds: int
     time_to_6h: Optional[str] = None
     time_to_9h: Optional[str] = None
     time_to_10h: Optional[str] = None
@@ -507,7 +508,8 @@ async def get_time_info(paola: bool = False, user: User = Depends(get_user_to_vi
         current_time=current_time.strftime("%H:%M"),
         time_worked_today=seconds_to_time_str(current_net_seconds),
         time_remaining=seconds_to_time_str(time_remaining_seconds),
-        manual_pause_seconds=manual_pause_seconds + work_interruption_seconds,
+        manual_pause_seconds=manual_pause_seconds,
+        work_interruption_seconds=work_interruption_seconds,
         time_to_6h=predict_end_time(6 * 3600),
         time_to_9h=predict_end_time(9 * 3600),
         time_to_10h=predict_end_time(10 * 3600),

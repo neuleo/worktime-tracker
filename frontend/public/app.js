@@ -28,7 +28,7 @@ async function router() {
     if (page === 'sessions') {
         await Promise.all([loadSessions(), loadUserSettings()]);
     } else if (page === 'timeinfo') {
-        await loadTimeInfo(); // Initial load
+        await Promise.all([loadTimeInfo(), loadUserSettings()]); // Load settings as well
         setupTimeInfoLiveUpdates(); // Start periodic updates
     } else if (page === 'flextime') {
         await loadOvertimeData();
