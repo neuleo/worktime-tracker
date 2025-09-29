@@ -158,6 +158,7 @@ class UserSettings(BaseModel):
     work_start_time_str: str
     work_end_time_str: str
     short_break_logic_enabled: bool
+    paola_pause_enabled: bool
 
 # --- HELPER & UTILITY FUNCTIONS ---
 def get_berlin_now(): return datetime.now(BERLIN_TZ)
@@ -360,6 +361,7 @@ async def update_user_settings(settings: UserSettings, current_user: User = Depe
     current_user.work_start_time_str = settings.work_start_time_str
     current_user.work_end_time_str = settings.work_end_time_str
     current_user.short_break_logic_enabled = settings.short_break_logic_enabled
+    current_user.paola_pause_enabled = settings.paola_pause_enabled
     db.commit(); db.refresh(current_user)
     return settings
 
@@ -645,6 +647,8 @@ async def get_user_settings(user: User = Depends(get_user_to_view)):
     user_data = user.__dict__
     if user_data.get('short_break_logic_enabled') is None:
         user_data['short_break_logic_enabled'] = True
+    if user_data.get('paola_pause_enabled') is None:
+        user_data['paola_pause_enabled'] = True
     return UserSettings.model_validate(user_data)
 
 # --- MAIN APP SETUP ---

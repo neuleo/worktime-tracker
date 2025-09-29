@@ -2,6 +2,8 @@
 #Arbeite die liste immer 1 nach dem anderen ab und das von oben nach unten
 #Sobald du ein fehler oder features gefixt/hinzugefügt hast, gib mir einmal commit message, damit man es committen kann. Tue dies erst, nachdem der Anwender bestätigt hat, das es erfolgreich implementiert wurde
 
+Bug: Der Button Paola Pause wird bei einer "short Pause" nicht mehr angezeigt, was er aber soll, da die große pause ja noch ansteht
+
 Feature:
 Es soll ein Toggle geben in den einstellungen für den Paola Pause button, da es nicht für jeden User relevant ist
 

@@ -130,6 +130,7 @@ function handleSettingsSubmit(event) {
     const startTime = document.getElementById('setting-start-time').value;
     const endTime = document.getElementById('setting-end-time').value;
     const shortBreakLogic = document.getElementById('setting-short-break-logic').checked;
+    const paolaPause = document.getElementById('setting-paola-pause').checked;
 
     const [h, m] = targetHours.split(':').map(Number);
     const targetSeconds = h * 3600 + m * 60;
@@ -138,7 +139,8 @@ function handleSettingsSubmit(event) {
         target_work_seconds: targetSeconds,
         work_start_time_str: startTime,
         work_end_time_str: endTime,
-        short_break_logic_enabled: shortBreakLogic
+        short_break_logic_enabled: shortBreakLogic,
+        paola_pause_enabled: paolaPause
     };
 
     saveUserSettings(newSettings);

@@ -48,6 +48,11 @@ def run_migration():
                 # Set default value for existing users
                 connection.execute(text('UPDATE users SET short_break_logic_enabled = TRUE'))
 
+            if 'paola_pause_enabled' not in columns:
+                print("Adding column: paola_pause_enabled")
+                connection.execute(text('ALTER TABLE users ADD COLUMN paola_pause_enabled BOOLEAN'))
+                connection.execute(text('UPDATE users SET paola_pause_enabled = TRUE'))
+
             # Use a session to update data
             with SessionLocal() as db:
                 # 2. Update existing 'leon' user
@@ -72,8 +77,8 @@ def run_migration():
                     print("Creating user 'paola'...")
                     hashed_password = pwd_context.hash(APP_PASSWORD) # Using same default password
                     db.execute(text("""
-                        INSERT INTO users (name, hashed_password, target_work_seconds, work_start_time_str, work_end_time_str, short_break_logic_enabled)
-                        VALUES ('paola', :hashed_password, 28800, '08:00', '18:00', TRUE)
+                        INSERT INTO users (name, hashed_password, target_work_seconds, work_start_time_str, work_end_time_str, short_break_logic_enabled, paola_pause_enabled)
+                        VALUES ('paola', :hashed_password, 28800, '08:00', '18:00', TRUE, TRUE)
                     """), {'hashed_password': hashed_password})
                     print("User 'paola' created.")
                 
