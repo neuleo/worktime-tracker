@@ -391,31 +391,41 @@ function render() {
     }
     
     rootEl.innerHTML = `
-        <div class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 status-bar-safe">
-            <header class="bg-white shadow-sm border-b sticky top-0 z-10">
-                <div class="max-w-md mx-auto px-4 py-4">
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center space-x-3">
-                            <button onclick="openMenu()" class="p-1 hover:bg-gray-100 rounded transition-colors">
-                                ${createIcon('menu', 'h-6 w-6 text-gray-600')}
-                            </button>
-                            ${createIcon('clock', 'h-6 w-6 text-blue-600')}
-                            <h1 class="text-xl font-bold text-gray-900">
-                                ${getPageTitle(currentPage)}
-                            </h1>
-                        </div>
-                        <div class="flex items-center space-x-2">
-                            ${createIcon(isOnline ? 'wifi' : 'wifioff', `h-4 w-4 ${isOnline ? 'text-green-500' : 'text-red-500'}`)}
-                            <span class="text-sm font-mono text-gray-600 current-time-display">${formatTime(currentTime)}</span>
-                        </div>
-                    </div>
-                </div>
-            </header>
+        <div class="lg:flex">
+            <!-- Static Sidebar for large screens -->
+            <div class="hidden lg:block lg:w-80 lg:flex-shrink-0">
+                ${renderMenu(true)} 
+            </div>
 
-            <main class="max-w-md mx-auto px-4 py-6">
-                ${pageContent}
-            </main>
+            <div class="flex-1 min-w-0">
+                <div class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 status-bar-safe">
+                    <header class="bg-white shadow-sm border-b sticky top-0 z-10">
+                        <div class="max-w-md lg:max-w-4xl mx-auto px-4 py-4">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center space-x-3">
+                                    <button onclick="openMenu()" class="lg:hidden p-1 hover:bg-gray-100 rounded transition-colors">
+                                        ${createIcon('menu', 'h-6 w-6 text-gray-600')}
+                                    </button>
+                                    ${createIcon('clock', 'h-6 w-6 text-blue-600')}
+                                    <h1 class="text-xl font-bold text-gray-900">
+                                        ${getPageTitle(currentPage)}
+                                    </h1>
+                                </div>
+                                <div class="flex items-center space-x-2">
+                                    ${createIcon(isOnline ? 'wifi' : 'wifioff', `h-4 w-4 ${isOnline ? 'text-green-500' : 'text-red-500'}`)}
+                                    <span class="text-sm font-mono text-gray-600 current-time-display">${formatTime(currentTime)}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </header>
+
+                    <main class="max-w-md lg:max-w-4xl mx-auto px-4 py-6">
+                        ${pageContent}
+                    </main>
+                </div>
+            </div>
         </div>
+        ${renderMenu(false)} <!-- Mobile menu overlay -->
     `;
 
     // Render dynamic parts after main render

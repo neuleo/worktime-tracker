@@ -117,7 +117,7 @@ async function renderCharts() {
     }
 
     chartsContainer.innerHTML = `
-        <div class="space-y-6">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div class="bg-white p-4 md:p-6 rounded-lg shadow-md">
                 <h3 class="text-lg font-bold mb-4 text-gray-700">Gleitzeitverlauf</h3>
                 <canvas id="overtime-chart"></canvas>
