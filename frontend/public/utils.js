@@ -98,6 +98,7 @@ function calculateDailyStatsJS(bookings, targetSeconds, options = {}) {
     const gross_session_seconds = Math.max(0, effective_last_stamp_seconds - effective_first_stamp_seconds);
 
     let manual_pause_seconds = 0;
+    let work_interruption_seconds = 0;
     for (let i = 0; i < sortedBookings.length - 1; i++) {
         if (sortedBookings[i].action === 'out' && sortedBookings[i+1].action === 'in') {
             const pause_start = getSecondsOfDay(sortedBookings[i]);
@@ -107,7 +108,12 @@ function calculateDailyStatsJS(bookings, targetSeconds, options = {}) {
             const effective_pause_end = Math.min(pause_end, effective_last_stamp_seconds);
 
             if (effective_pause_end > effective_pause_start) {
-                manual_pause_seconds += (effective_pause_end - effective_pause_start);
+                const pause_duration_seconds = (effective_pause_end - effective_pause_start);
+                if (pause_duration_seconds >= 900) { // 15 minutes is a pause
+                    manual_pause_seconds += pause_duration_seconds;
+                } else { // Shorter is an interruption
+                    work_interruption_seconds += pause_duration_seconds;
+                }
             }
         }
     }
@@ -139,20 +145,22 @@ function calculateDailyStatsJS(bookings, targetSeconds, options = {}) {
         total_deducted_pause_seconds = Math.max(total_deducted_pause_seconds, paola_pause_seconds);
     }
     
-    let net_work_seconds = gross_session_seconds - total_deducted_pause_seconds;
+    let net_work_seconds = gross_session_seconds - total_deducted_pause_seconds - work_interruption_seconds;
     net_work_seconds = Math.max(0, net_work_seconds);
 
     const TEN_HOURS_SECONDS = 10 * 3600;
     const capped_net_worked_seconds = Math.min(net_work_seconds, TEN_HOURS_SECONDS);
 
     const overtime_seconds = capped_net_worked_seconds - targetSeconds;
+    
+    const displayed_pause_seconds = total_deducted_pause_seconds + work_interruption_seconds;
 
     return {
         worked: secondsToTimeStr(capped_net_worked_seconds),
-        pause: secondsToTimeStr(total_deducted_pause_seconds),
+        pause: secondsToTimeStr(displayed_pause_seconds),
         overtime: secondsToTimeStr(overtime_seconds),
         netSeconds: capped_net_worked_seconds,
-        pauseSeconds: total_deducted_pause_seconds,
+        pauseSeconds: displayed_pause_seconds,
         overtimeSeconds: overtime_seconds
     };
 }

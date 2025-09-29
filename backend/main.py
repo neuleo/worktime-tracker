@@ -198,31 +198,53 @@ async def get_user_to_view(user: Optional[str] = None, current_user: User = Depe
 
 # --- BUSINESS LOGIC ---
 
-def _calculate_net_work_time_and_pause(gross_session_seconds: int, manual_pause_seconds: int) -> tuple[int, int]:
-    statutory_break_seconds = 0
+def _calculate_statutory_break(gross_session_seconds: int) -> int:
+    """Calculates statutory break time based on gross work time, including gradual rules."""
     SIX_HOURS_IN_SECONDS = 6 * 3600
+    SIX_HOURS_30_MIN_IN_SECONDS = 6.5 * 3600
     NINE_HOURS_IN_SECONDS = 9 * 3600
+    NINE_HOURS_15_MIN_IN_SECONDS = 9.25 * 3600
 
-    if gross_session_seconds > NINE_HOURS_IN_SECONDS:
-        statutory_break_seconds = 45 * 60
-    elif gross_session_seconds > SIX_HOURS_IN_SECONDS:
+    statutory_break_seconds = 0
+    if gross_session_seconds <= SIX_HOURS_IN_SECONDS:
+        statutory_break_seconds = 0
+    elif gross_session_seconds <= SIX_HOURS_30_MIN_IN_SECONDS:
+        statutory_break_seconds = gross_session_seconds - SIX_HOURS_IN_SECONDS
+    elif gross_session_seconds <= NINE_HOURS_IN_SECONDS:
         statutory_break_seconds = 30 * 60
+    elif gross_session_seconds <= NINE_HOURS_15_MIN_IN_SECONDS:
+        statutory_break_seconds = (30 * 60) + (gross_session_seconds - NINE_HOURS_IN_SECONDS)
+    else:
+        statutory_break_seconds = 45 * 60
+        
+    return int(statutory_break_seconds)
 
+def _calculate_net_work_time_and_pause(gross_session_seconds: int, manual_pause_seconds: int) -> tuple[int, int]:
+    statutory_break_seconds = _calculate_statutory_break(gross_session_seconds)
     total_deducted_pause_seconds = max(manual_pause_seconds, statutory_break_seconds)
     net_work_seconds = max(0, gross_session_seconds - total_deducted_pause_seconds)
     return int(net_work_seconds), int(total_deducted_pause_seconds)
 
-def _calculate_statutory_break_for_prediction(gross_session_seconds: int) -> int:
-    statutory_break_seconds = 0
-    SIX_HOURS_IN_SECONDS = 6 * 3600
-    NINE_HOURS_IN_SECONDS = 9 * 3600
-
-    if gross_session_seconds > NINE_HOURS_IN_SECONDS:
-        statutory_break_seconds = 45 * 60
-    elif gross_session_seconds > SIX_HOURS_IN_SECONDS:
-        statutory_break_seconds = 30 * 60
-        
-    return statutory_break_seconds
+def _calculate_pauses_and_interruptions(
+    sorted_bookings: List[WorkSession], 
+    effective_first_stamp: datetime, 
+    effective_last_stamp: datetime
+) -> tuple[int, int]:
+    manual_pause_seconds = 0
+    work_interruption_seconds = 0
+    for i in range(len(sorted_bookings) - 1):
+        if sorted_bookings[i].action == 'out' and sorted_bookings[i+1].action == 'in':
+            pause_start = ensure_berlin_tz(sorted_bookings[i].timestamp)
+            pause_end = ensure_berlin_tz(sorted_bookings[i+1].timestamp)
+            effective_pause_start = max(pause_start, effective_first_stamp)
+            effective_pause_end = min(pause_end, effective_last_stamp)
+            if effective_pause_end > effective_pause_start:
+                pause_duration_seconds = int((effective_pause_end - effective_pause_start).total_seconds())
+                if pause_duration_seconds >= 900:  # 15 minutes is a pause
+                    manual_pause_seconds += pause_duration_seconds
+                else:  # Shorter is an interruption
+                    work_interruption_seconds += pause_duration_seconds
+    return manual_pause_seconds, work_interruption_seconds
 
 def calculate_daily_stats(bookings: List[WorkSession], is_ongoing_day: bool, user: User) -> tuple[int, int, int]:
     if not bookings: return 0, 0, 0
@@ -234,16 +256,24 @@ def calculate_daily_stats(bookings: List[WorkSession], is_ongoing_day: bool, use
     cutoff_start, cutoff_end = datetime.combine(day_date, start_time_obj, tzinfo=BERLIN_TZ), datetime.combine(day_date, end_time_obj, tzinfo=BERLIN_TZ)
     first_stamp = ensure_berlin_tz(sorted_bookings[0].timestamp)
     last_stamp = get_berlin_now() if is_ongoing_day and sorted_bookings[-1].action == 'in' else ensure_berlin_tz(sorted_bookings[-1].timestamp)
+    
     effective_first_stamp, effective_last_stamp = max(first_stamp, cutoff_start), min(last_stamp, cutoff_end)
     if effective_first_stamp > effective_last_stamp: effective_first_stamp = effective_last_stamp
+    
     gross_session_seconds = int((effective_last_stamp - effective_first_stamp).total_seconds())
-    manual_pause_seconds = 0
-    for i in range(len(sorted_bookings) - 1):
-        if sorted_bookings[i].action == 'out' and sorted_bookings[i+1].action == 'in':
-            pause_start, pause_end = ensure_berlin_tz(sorted_bookings[i].timestamp), ensure_berlin_tz(sorted_bookings[i+1].timestamp)
-            effective_pause_start, effective_pause_end = max(pause_start, effective_first_stamp), min(pause_end, effective_last_stamp)
-            if effective_pause_end > effective_pause_start: manual_pause_seconds += int((effective_pause_end - effective_pause_start).total_seconds())
-    net_worked_seconds, total_pause_seconds = _calculate_net_work_time_and_pause(gross_session_seconds, manual_pause_seconds)
+
+    manual_pause_seconds, work_interruption_seconds = _calculate_pauses_and_interruptions(
+        sorted_bookings, effective_first_stamp, effective_last_stamp
+    )
+
+    net_worked_seconds, total_deducted_pause = _calculate_net_work_time_and_pause(gross_session_seconds, manual_pause_seconds)
+
+    # Interruptions are always deducted from work time, on top of pauses.
+    net_worked_seconds -= work_interruption_seconds
+    
+    # The displayed pause is the combination of deducted statutory/manual pause and interruptions.
+    total_pause_seconds = total_deducted_pause + work_interruption_seconds
+
     capped_net_worked_seconds = min(net_worked_seconds, 10 * 3600)
     overtime_seconds = capped_net_worked_seconds - user.target_work_seconds
     return capped_net_worked_seconds, total_pause_seconds, overtime_seconds
@@ -411,17 +441,26 @@ async def get_time_info(paola: bool = False, user: User = Depends(get_user_to_vi
             manual_pause_seconds=0 # Simplified
         )
 
-    # --- Calculate current state ---
-    first_stamp_today = today_bookings[0]
-    manual_pause_seconds = 0
-    for i in range(len(today_bookings) - 1):
-        if today_bookings[i].action == 'out' and today_bookings[i+1].action == 'in':
-            pause_start = ensure_berlin_tz(today_bookings[i].timestamp)
-            pause_end = ensure_berlin_tz(today_bookings[i+1].timestamp)
-            manual_pause_seconds += int((pause_end - pause_start).total_seconds())
+    # --- Calculate current state ---    
+    day_date = ensure_berlin_tz(today_bookings[0].timestamp).date()
+    try:
+        start_time_obj, end_time_obj = time.fromisoformat(user.work_start_time_str), time.fromisoformat(user.work_end_time_str)
+    except ValueError: start_time_obj, end_time_obj = time(6, 30), time(18, 30)
+    cutoff_start, cutoff_end = datetime.combine(day_date, start_time_obj, tzinfo=BERLIN_TZ), datetime.combine(day_date, end_time_obj, tzinfo=BERLIN_TZ)
 
-    current_gross_seconds = (current_time - ensure_berlin_tz(first_stamp_today.timestamp)).total_seconds()
-    current_net_seconds, _ = _calculate_net_work_time_and_pause(current_gross_seconds, manual_pause_seconds)
+    first_stamp = ensure_berlin_tz(today_bookings[0].timestamp)
+    effective_first_stamp = max(first_stamp, cutoff_start)
+    effective_last_stamp = min(current_time, cutoff_end)
+    if effective_first_stamp > effective_last_stamp: effective_first_stamp = effective_last_stamp
+
+    current_gross_seconds = int((effective_last_stamp - effective_first_stamp).total_seconds())
+
+    manual_pause_seconds, work_interruption_seconds = _calculate_pauses_and_interruptions(
+        today_bookings, effective_first_stamp, effective_last_stamp
+    )
+
+    current_net_seconds, deducted_pause = _calculate_net_work_time_and_pause(current_gross_seconds, manual_pause_seconds)
+    current_net_seconds -= work_interruption_seconds
 
     time_remaining_seconds = max(0, user.target_work_seconds - current_net_seconds)
 
@@ -430,20 +469,22 @@ async def get_time_info(paola: bool = False, user: User = Depends(get_user_to_vi
         if current_net_seconds >= target_net_seconds:
             return None # Already reached
 
-        # Estimate remaining gross time needed
         remaining_net = target_net_seconds - current_net_seconds
         estimated_end = current_time + timedelta(seconds=remaining_net)
 
-        # Iteratively refine the estimate to account for statutory breaks
         for _ in range(5): # 5 iterations are more than enough to converge
-            future_gross_seconds = (estimated_end - ensure_berlin_tz(first_stamp_today.timestamp)).total_seconds()
-            future_statutory_break = _calculate_statutory_break_for_prediction(future_gross_seconds)
+            future_effective_last_stamp = min(estimated_end, cutoff_end)
+            if effective_first_stamp > future_effective_last_stamp: future_effective_last_stamp = effective_first_stamp
+            
+            future_gross_seconds = (future_effective_last_stamp - effective_first_stamp).total_seconds()
+            future_statutory_break = _calculate_statutory_break(future_gross_seconds)
             
             if paola:
                 future_statutory_break = max(future_statutory_break, 50 * 60)
 
             total_future_pause = max(manual_pause_seconds, future_statutory_break)
-            future_net_seconds = future_gross_seconds - total_future_pause
+            
+            future_net_seconds = future_gross_seconds - total_future_pause - work_interruption_seconds
             
             error_seconds = future_net_seconds - target_net_seconds
             if abs(error_seconds) < 1: # Close enough
@@ -456,7 +497,7 @@ async def get_time_info(paola: bool = False, user: User = Depends(get_user_to_vi
         current_time=current_time.strftime("%H:%M"),
         time_worked_today=seconds_to_time_str(current_net_seconds),
         time_remaining=seconds_to_time_str(time_remaining_seconds),
-        manual_pause_seconds=manual_pause_seconds,
+        manual_pause_seconds=manual_pause_seconds + work_interruption_seconds,
         time_to_6h=predict_end_time(6 * 3600),
         time_to_9h=predict_end_time(9 * 3600),
         time_to_10h=predict_end_time(10 * 3600),
