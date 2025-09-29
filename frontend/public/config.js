@@ -25,6 +25,7 @@ let appState = {
     isOnline: navigator.onLine,
     activeTab: 'today',
     currentPage: 'dashboard',
+    overtimeInputMode: 'decimal',
     plannedDepartureTime: '',
     paolaButtonActive: false,
     // Multi-user state

@@ -106,17 +106,64 @@ function handleManualSubmit(event) {
     createManualBooking(date, action, time);
 }
 
+function switchOvertimeInputMode(mode) {
+    appState.overtimeInputMode = mode;
+    const container = document.getElementById('overtime-input-container');
+    const decimalBtn = document.getElementById('ot-mode-decimal');
+    const timeBtn = document.getElementById('ot-mode-time');
+
+    if (mode === 'decimal') {
+        container.innerHTML = `
+            <input 
+                type="number" 
+                step="0.01" 
+                id="overtime-hours-decimal" 
+                placeholder="z.B. 6.8 oder -2.5"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono"
+            >
+        `;
+        decimalBtn.classList.add('bg-blue-500', 'text-white');
+        decimalBtn.classList.remove('bg-white', 'text-gray-700');
+        timeBtn.classList.add('bg-white', 'text-gray-700');
+        timeBtn.classList.remove('bg-blue-500', 'text-white');
+    } else {
+        container.innerHTML = `
+            <input 
+                type="time" 
+                id="overtime-hours-time" 
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono"
+            >
+        `;
+        timeBtn.classList.add('bg-blue-500', 'text-white');
+        timeBtn.classList.remove('bg-white', 'text-gray-700');
+        decimalBtn.classList.add('bg-white', 'text-gray-700');
+        decimalBtn.classList.remove('bg-blue-500', 'text-white');
+    }
+}
+
 function handleOvertimeSubmit(event) {
     event.preventDefault();
-    const hoursInput = document.getElementById('overtime-hours');
-    if (!hoursInput || !hoursInput.value) {
-        showNotification('Bitte einen Wert eingeben', 'error');
-        return;
-    }
     
-    const hours = parseFloat(hoursInput.value.replace(',', '.'));
+    let hours;
+    if (appState.overtimeInputMode === 'decimal') {
+        const decimalInput = document.getElementById('overtime-hours-decimal');
+        if (!decimalInput || !decimalInput.value) {
+            showNotification('Bitte einen Wert eingeben', 'error');
+            return;
+        }
+        hours = parseFloat(decimalInput.value.replace(',', '.'));
+    } else {
+        const timeInput = document.getElementById('overtime-hours-time');
+        if (!timeInput || !timeInput.value) {
+            showNotification('Bitte eine Zeit eingeben', 'error');
+            return;
+        }
+        const [h, m] = timeInput.value.split(':').map(Number);
+        hours = h + (m / 60);
+    }
+
     if (isNaN(hours)) {
-        showNotification('Ungültiger Wert. Bitte eine Zahl eingeben.', 'error');
+        showNotification('Ungültiger Wert. Bitte eine Zahl oder Zeit eingeben.', 'error');
         return;
     }
 
@@ -179,6 +226,7 @@ function openOvertimeModal() {
     const modal = document.getElementById('overtime-modal');
     if (modal) {
         modal.classList.remove('hidden');
+        switchOvertimeInputMode('decimal'); // Default to decimal mode
     }
 }
 

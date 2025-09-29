@@ -840,16 +840,16 @@ function renderFlextimePage() {
                 </div>
                 <form onsubmit="handleOvertimeSubmit(event)" class="p-6 space-y-4">
                     <div>
-                        <label for="overtime-hours" class="block text-sm font-medium text-gray-700 mb-2">
-                            Neuer Gleitzeit-Stand (in Dezimalstunden)
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            Neuer Gleitzeit-Stand
                         </label>
-                        <input 
-                            type="number" 
-                            step="0.01" 
-                            id="overtime-hours" 
-                            placeholder="z.B. 6.8 oder -2.5"
-                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono"
-                        >
+                        <div class="mb-2 flex border border-gray-300 rounded-lg overflow-hidden">
+                            <button type="button" id="ot-mode-decimal" class="flex-1 p-2 text-sm" onclick="switchOvertimeInputMode('decimal')">Dezimal</button>
+                            <button type="button" id="ot-mode-time" class="flex-1 p-2 text-sm" onclick="switchOvertimeInputMode('time')">Stunden:Minuten</button>
+                        </div>
+                        <div id="overtime-input-container">
+                            <!-- Input field will be rendered here by switchOvertimeInputMode -->
+                        </div>
                     </div>
                     <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
                         <p class="text-xs text-yellow-800">
