@@ -97,6 +97,8 @@ function calculateDailyStatsJS(bookings, targetSeconds, options = {}) {
     // If the effective stamps create a negative duration, gross time is 0.
     const gross_session_seconds = Math.max(0, effective_last_stamp_seconds - effective_first_stamp_seconds);
 
+    const use_short_break_logic = options.short_break_logic;
+
     let manual_pause_seconds = 0;
     let work_interruption_seconds = 0;
     for (let i = 0; i < sortedBookings.length - 1; i++) {
@@ -109,10 +111,10 @@ function calculateDailyStatsJS(bookings, targetSeconds, options = {}) {
 
             if (effective_pause_end > effective_pause_start) {
                 const pause_duration_seconds = (effective_pause_end - effective_pause_start);
-                if (pause_duration_seconds >= 900) { // 15 minutes is a pause
-                    manual_pause_seconds += pause_duration_seconds;
-                } else { // Shorter is an interruption
+                if (use_short_break_logic && pause_duration_seconds < 900) { // 15 minutes is a pause
                     work_interruption_seconds += pause_duration_seconds;
+                } else { // Shorter is an interruption
+                    manual_pause_seconds += pause_duration_seconds;
                 }
             }
         }

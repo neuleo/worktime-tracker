@@ -42,6 +42,12 @@ def run_migration():
                 print("Adding column: work_end_time_str")
                 connection.execute(text('ALTER TABLE users ADD COLUMN work_end_time_str VARCHAR'))
             
+            if 'short_break_logic_enabled' not in columns:
+                print("Adding column: short_break_logic_enabled")
+                connection.execute(text('ALTER TABLE users ADD COLUMN short_break_logic_enabled BOOLEAN'))
+                # Set default value for existing users
+                connection.execute(text('UPDATE users SET short_break_logic_enabled = TRUE'))
+
             # Use a session to update data
             with SessionLocal() as db:
                 # 2. Update existing 'leon' user
@@ -54,7 +60,8 @@ def run_migration():
                         SET hashed_password = :hashed_password,
                             target_work_seconds = 28080,
                             work_start_time_str = '06:30',
-                            work_end_time_str = '18:30'
+                            work_end_time_str = '18:30',
+                            short_break_logic_enabled = TRUE
                         WHERE name = 'leon'
                     """), {'hashed_password': hashed_password})
                     print("User 'leon' updated.")
@@ -65,8 +72,8 @@ def run_migration():
                     print("Creating user 'paola'...")
                     hashed_password = pwd_context.hash(APP_PASSWORD) # Using same default password
                     db.execute(text("""
-                        INSERT INTO users (name, hashed_password, target_work_seconds, work_start_time_str, work_end_time_str)
-                        VALUES ('paola', :hashed_password, 28800, '08:00', '18:00')
+                        INSERT INTO users (name, hashed_password, target_work_seconds, work_start_time_str, work_end_time_str, short_break_logic_enabled)
+                        VALUES ('paola', :hashed_password, 28800, '08:00', '18:00', TRUE)
                     """), {'hashed_password': hashed_password})
                     print("User 'paola' created.")
                 

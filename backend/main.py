@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Depends, Request, Response, APIRoute
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, desc, func
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, desc, func, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 from datetime import datetime, timedelta, time
@@ -44,6 +44,8 @@ class User(Base):
     target_work_seconds = Column(Integer, default=28080, nullable=False) # 7h 48m
     work_start_time_str = Column(String, default="06:30", nullable=False)
     work_end_time_str = Column(String, default="18:30", nullable=False)
+    short_break_logic_enabled = Column(Boolean, default=True, nullable=False)
+    paola_pause_enabled = Column(Boolean, default=True, nullable=False)
 
     work_sessions = relationship("WorkSession", back_populates="user", cascade="all, delete-orphan")
     overtime_adjustments = relationship("OvertimeAdjustment", back_populates="user", cascade="all, delete-orphan")
@@ -155,6 +157,7 @@ class UserSettings(BaseModel):
     target_work_seconds: int
     work_start_time_str: str
     work_end_time_str: str
+    short_break_logic_enabled: bool
 
 # --- HELPER & UTILITY FUNCTIONS ---
 def get_berlin_now(): return datetime.now(BERLIN_TZ)
@@ -228,10 +231,14 @@ def _calculate_net_work_time_and_pause(gross_session_seconds: int, manual_pause_
 def _calculate_pauses_and_interruptions(
     sorted_bookings: List[WorkSession], 
     effective_first_stamp: datetime, 
-    effective_last_stamp: datetime
+    effective_last_stamp: datetime,
+    user: User
 ) -> tuple[int, int]:
     manual_pause_seconds = 0
     work_interruption_seconds = 0
+
+    use_short_break_logic = user.short_break_logic_enabled
+
     for i in range(len(sorted_bookings) - 1):
         if sorted_bookings[i].action == 'out' and sorted_bookings[i+1].action == 'in':
             pause_start = ensure_berlin_tz(sorted_bookings[i].timestamp)
@@ -240,10 +247,10 @@ def _calculate_pauses_and_interruptions(
             effective_pause_end = min(pause_end, effective_last_stamp)
             if effective_pause_end > effective_pause_start:
                 pause_duration_seconds = int((effective_pause_end - effective_pause_start).total_seconds())
-                if pause_duration_seconds >= 900:  # 15 minutes is a pause
-                    manual_pause_seconds += pause_duration_seconds
-                else:  # Shorter is an interruption
+                if use_short_break_logic and pause_duration_seconds < 900:
                     work_interruption_seconds += pause_duration_seconds
+                else:
+                    manual_pause_seconds += pause_duration_seconds
     return manual_pause_seconds, work_interruption_seconds
 
 def calculate_daily_stats(bookings: List[WorkSession], is_ongoing_day: bool, user: User) -> tuple[int, int, int]:
@@ -263,7 +270,7 @@ def calculate_daily_stats(bookings: List[WorkSession], is_ongoing_day: bool, use
     gross_session_seconds = int((effective_last_stamp - effective_first_stamp).total_seconds())
 
     manual_pause_seconds, work_interruption_seconds = _calculate_pauses_and_interruptions(
-        sorted_bookings, effective_first_stamp, effective_last_stamp
+        sorted_bookings, effective_first_stamp, effective_last_stamp, user
     )
 
     net_worked_seconds, total_deducted_pause = _calculate_net_work_time_and_pause(gross_session_seconds, manual_pause_seconds)
@@ -352,6 +359,7 @@ async def update_user_settings(settings: UserSettings, current_user: User = Depe
     current_user.target_work_seconds = settings.target_work_seconds
     current_user.work_start_time_str = settings.work_start_time_str
     current_user.work_end_time_str = settings.work_end_time_str
+    current_user.short_break_logic_enabled = settings.short_break_logic_enabled
     db.commit(); db.refresh(current_user)
     return settings
 
@@ -456,7 +464,7 @@ async def get_time_info(paola: bool = False, user: User = Depends(get_user_to_vi
     current_gross_seconds = int((effective_last_stamp - effective_first_stamp).total_seconds())
 
     manual_pause_seconds, work_interruption_seconds = _calculate_pauses_and_interruptions(
-        today_bookings, effective_first_stamp, effective_last_stamp
+        today_bookings, effective_first_stamp, effective_last_stamp, user
     )
 
     current_net_seconds, deducted_pause = _calculate_net_work_time_and_pause(current_gross_seconds, manual_pause_seconds)
@@ -634,7 +642,10 @@ async def get_statistics(from_date: str, to_date: str, user: User = Depends(get_
 
 @api_router.get("/settings", response_model=UserSettings)
 async def get_user_settings(user: User = Depends(get_user_to_view)):
-    return UserSettings.model_validate(user.__dict__)
+    user_data = user.__dict__
+    if user_data.get('short_break_logic_enabled') is None:
+        user_data['short_break_logic_enabled'] = True
+    return UserSettings.model_validate(user_data)
 
 # --- MAIN APP SETUP ---
 app = FastAPI(title="Arbeitszeit Tracking API", version="1.5.0")

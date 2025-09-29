@@ -129,6 +129,7 @@ function handleSettingsSubmit(event) {
     const targetHours = document.getElementById('setting-target-hours').value;
     const startTime = document.getElementById('setting-start-time').value;
     const endTime = document.getElementById('setting-end-time').value;
+    const shortBreakLogic = document.getElementById('setting-short-break-logic').checked;
 
     const [h, m] = targetHours.split(':').map(Number);
     const targetSeconds = h * 3600 + m * 60;
@@ -136,7 +137,8 @@ function handleSettingsSubmit(event) {
     const newSettings = {
         target_work_seconds: targetSeconds,
         work_start_time_str: startTime,
-        work_end_time_str: endTime
+        work_end_time_str: endTime,
+        short_break_logic_enabled: shortBreakLogic
     };
 
     saveUserSettings(newSettings);
@@ -158,7 +160,10 @@ function handlePlannedDepartureChange(event) {
     const plannedTimestampIso = `${todayDate}T${plannedTime}:00`;
     tempBookings.push({ action: 'out', time: plannedTime, timestamp_iso: plannedTimestampIso });
 
-    const stats = calculateDailyStatsJS(tempBookings, appState.settings.target_work_seconds, { paola: appState.paolaButtonActive });
+    const stats = calculateDailyStatsJS(tempBookings, appState.settings.target_work_seconds, { 
+        paola: appState.paolaButtonActive,
+        short_break_logic: appState.settings.short_break_logic_enabled
+    });
     const overtimeColor = getOvertimeColor(stats.overtime);
     resultEl.innerHTML = `
         <div class="text-center mt-4 p-4 bg-gray-50 rounded-lg">
