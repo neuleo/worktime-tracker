@@ -178,8 +178,8 @@ function renderStartEndChart(data) {
                 y: {
                     beginAtZero: false,
                     title: { display: true, text: 'Uhrzeit' },
-                    min: 0,
-                    max: 24,
+                    min: 6,
+                    max: 19,
                     ticks: { stepSize: 1 }
                 }
             },

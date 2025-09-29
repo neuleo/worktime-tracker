@@ -552,8 +552,13 @@ async def get_statistics(from_date: str, to_date: str, user: User = Depends(get_
 
     # 2. Calculate Daily Summary
     daily_summary = []
+    today = get_berlin_now().date()
     date_iterator = from_date_dt.date()
     while date_iterator <= to_date_dt.date():
+        if date_iterator == today:
+            date_iterator += timedelta(days=1)
+            continue
+
         day_bookings = sessions_by_day.get(date_iterator, [])
         
         if not day_bookings:
