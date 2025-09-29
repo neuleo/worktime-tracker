@@ -879,6 +879,16 @@ function renderFlextimePage() {
                             <b>Hinweis:</b> Hiermit wird eine Korrektur-Buchung erstellt, um den aktuellen Stand auf den von dir eingegebenen Wert zu ändern.
                         </p>
                     </div>
+                    <div>
+                        <label for="overtime-date" class="block text-sm font-medium text-gray-700 mb-2">
+                            Gültig ab Datum
+                        </label>
+                        <input 
+                            type="date" 
+                            id="overtime-date" 
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        >
+                    </div>
                     <button 
                         type="submit"
                         class="w-full py-3 px-4 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition-colors"

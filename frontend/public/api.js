@@ -154,13 +154,13 @@ async function loadStatistics(fromDate, toDate) {
 }
 
 // --- Actions ---
-async function adjustOvertime(hours) {
+async function adjustOvertime(adjustmentData) {
     try {
         // NOTE: This action is performed by the LOGGED IN user, not the ACTIVE user.
         const response = await apiCall('/overtime', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ hours: hours })
+            body: JSON.stringify(adjustmentData)
         });
         if (!response.ok) throw new Error((await response.json()).detail || 'Failed to adjust overtime');
         showNotification('Gleitzeit erfolgreich angepasst', 'success');

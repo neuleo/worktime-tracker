@@ -167,7 +167,13 @@ function handleOvertimeSubmit(event) {
         return;
     }
 
-    adjustOvertime(hours);
+    const dateInput = document.getElementById('overtime-date');
+    const adjustmentData = {
+        hours: hours,
+        date: dateInput.value || null
+    };
+
+    adjustOvertime(adjustmentData);
     closeOvertimeModal();
 }
 
@@ -227,6 +233,10 @@ function handlePlannedDepartureChange(event) {
 function openOvertimeModal() {
     const modal = document.getElementById('overtime-modal');
     if (modal) {
+        const dateInput = document.getElementById('overtime-date');
+        if(dateInput) {
+            dateInput.value = new Date().toISOString().split('T')[0];
+        }
         modal.classList.remove('hidden');
         switchOvertimeInputMode('decimal'); // Default to decimal mode
     }
