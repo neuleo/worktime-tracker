@@ -394,7 +394,7 @@ function render() {
         <div class="lg:flex">
             <!-- Static Sidebar for large screens -->
             <div class="hidden lg:block lg:w-80 lg:flex-shrink-0">
-                ${renderMenu(true)} 
+                ${renderDesktopMenu()} 
             </div>
 
             <div class="flex-1 min-w-0">
@@ -425,16 +425,21 @@ function render() {
                 </div>
             </div>
         </div>
-        ${renderMenu(false)} <!-- Mobile menu overlay -->
     `;
 
     // Render dynamic parts after main render
     if (currentPage === 'stats') {
         setTimeout(renderCharts, 0); // Use setTimeout to ensure DOM is updated
     }
-    const userSwitcherContainer = document.getElementById('user-switcher-container');
-    if (userSwitcherContainer) {
-        userSwitcherContainer.innerHTML = renderUserSwitcher();
+    
+    // The user switcher is rendered in two places, so we need to populate both.
+    const desktopUserSwitcher = document.getElementById('desktop-user-switcher');
+    if (desktopUserSwitcher) {
+        desktopUserSwitcher.innerHTML = renderUserSwitcher();
+    }
+    const mobileUserSwitcher = document.getElementById('mobile-user-switcher');
+    if (mobileUserSwitcher) {
+        mobileUserSwitcher.innerHTML = renderUserSwitcher();
     }
 }
 
@@ -489,6 +494,9 @@ function setupEventListeners() {
 async function init() {
     console.log('🚀 Arbeitszeit Tracker starting...');
     
+    // One-time render of the mobile menu into its own root
+    document.getElementById('menu-root').innerHTML = renderMobileMenu();
+
     appState.isOnline = navigator.onLine;
     
     setupEventListeners();
