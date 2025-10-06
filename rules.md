@@ -23,3 +23,6 @@ DAS Problem ist gerade, das auf der Seite für heute 17:55 als Zeit angegeben is
 Außerdem ist zu beachten, das vor 6:30 und nach 18:30 die Arbeitszeit quasi nicht gilt. Die Arbeitszeit wird erst ab 6:30 gerechnet und nach 18:30 nicht mehr weiter gerechnet. Wenn ich also um 6:25 starte, soll mit 6:30 gerechnet werden, da das die frühste start zeit ist, und wenn ich um 18:40 gehe, soll 18:30 als Endzeit genommen werden, da ab da die Arbeitszeit nicht mehr zählt
 
 Wenn eine Pause kürzer als 15 minuten ist, wird es gewertet als temporärer arbeits aussetzer und nicht als Pause. Zb wenn ich von 8.00 Uhr bis 8:10 Uhr ausstempel und dann nachher nochma von 12:00 bis 12:30. Dann ist das erste ein Arbeitszeitaussetzer und das 2. dann die Pause. Arbeitszetaussetzer kann ich beliebig oft machen
+
+Bei der vorraussichtlichen Überstundenberechnung soll bei 6 Stunden die Arbeitszeit berechnet werden: 6h und 0 min Pause
+Bei 9H soll die Arbeitszeit für 9h und 30min sein. und 10h soll 10h und 45min Pause

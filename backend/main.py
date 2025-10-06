@@ -616,77 +616,57 @@ async def get_time_info(paola: bool = False, user: User = Depends(get_user_to_vi
     current_time = get_berlin_now()
     today_bookings = get_day_bookings(db, user.id, current_time)
 
-    # If not stamped in, we can't predict anything
     if not today_bookings or today_bookings[-1].action == 'out':
         worked_seconds, _, _ = calculate_daily_stats(today_bookings, False, user)
         return TimeInfoResponse(
             current_time=current_time.strftime("%H:%M"),
             time_worked_today=seconds_to_time_str(worked_seconds),
             time_remaining=seconds_to_time_str(max(0, user.target_work_seconds - worked_seconds)),
-            manual_pause_seconds=0, # Simplified
-            work_interruption_seconds=0 # Simplified
+            manual_pause_seconds=0, 
+            work_interruption_seconds=0
         )
 
-    # --- Calculate current state ---    
     day_date = ensure_berlin_tz(today_bookings[0].timestamp).date()
     try:
         start_time_obj, end_time_obj = time.fromisoformat(user.work_start_time_str), time.fromisoformat(user.work_end_time_str)
-    except ValueError: start_time_obj, end_time_obj = time(6, 30), time(18, 30)
-    cutoff_start, cutoff_end = datetime.combine(day_date, start_time_obj, tzinfo=BERLIN_TZ), datetime.combine(day_date, end_time_obj, tzinfo=BERLIN_TZ)
+    except ValueError: 
+        start_time_obj, end_time_obj = time(6, 30), time(18, 30)
+    cutoff_start = datetime.combine(day_date, start_time_obj, tzinfo=BERLIN_TZ)
+    cutoff_end = datetime.combine(day_date, end_time_obj, tzinfo=BERLIN_TZ)
 
     first_stamp = ensure_berlin_tz(today_bookings[0].timestamp)
     effective_first_stamp = max(first_stamp, cutoff_start)
     effective_last_stamp = min(current_time, cutoff_end)
-    if effective_first_stamp > effective_last_stamp: effective_first_stamp = effective_last_stamp
+    if effective_first_stamp > effective_last_stamp: 
+        effective_first_stamp = effective_last_stamp
 
     current_gross_seconds = int((effective_last_stamp - effective_first_stamp).total_seconds())
-
     manual_pause_seconds, work_interruption_seconds = _calculate_pauses_and_interruptions(
         today_bookings, effective_first_stamp, effective_last_stamp, user
     )
-
     current_net_seconds, deducted_pause = _calculate_net_work_time_and_pause(current_gross_seconds, manual_pause_seconds)
     current_net_seconds -= work_interruption_seconds
-
     time_remaining_seconds = max(0, user.target_work_seconds - current_net_seconds)
 
-    # --- Prediction Logic ---
-    def predict_end_time(target_net_seconds):
-        if current_net_seconds >= target_net_seconds:
-            return None # Already reached
-
-        remaining_net = target_net_seconds - current_net_seconds
-        estimated_end = current_time + timedelta(seconds=remaining_net)
-
-        converged = False
-        for _ in range(15): # More iterations to ensure convergence
-            future_effective_last_stamp = min(estimated_end, cutoff_end)
-            if effective_first_stamp > future_effective_last_stamp: future_effective_last_stamp = effective_first_stamp
-            
-            future_gross_seconds = int((future_effective_last_stamp - effective_first_stamp).total_seconds())
-            future_statutory_break = _calculate_statutory_break(future_gross_seconds)
-            
-            if paola:
-                future_statutory_break = max(future_statutory_break, 50 * 60)
-
-            total_future_pause = max(manual_pause_seconds, future_statutory_break)
-            
-            future_net_seconds = future_gross_seconds - total_future_pause - work_interruption_seconds
-            
-            error_seconds = future_net_seconds - target_net_seconds
-            if abs(error_seconds) < 2: # Converged if error is less than 2 seconds
-                converged = True
-                break
-            estimated_end -= timedelta(seconds=error_seconds)
-
-        if not converged:
-            return None # Prediction did not converge, result is unreliable
-
-        # If the loop results in a time on the next day, the target is unreachable today.
-        if estimated_end.date() > day_date:
+    def predict(target_seconds):
+        if current_net_seconds >= target_seconds:
             return None
+        
+        remaining_seconds = target_seconds - current_net_seconds
+        estimated_end = current_time + timedelta(seconds=remaining_seconds)
+        
+        future_gross = (min(estimated_end, cutoff_end) - effective_first_stamp).total_seconds()
+        future_break = _calculate_statutory_break(future_gross)
+        if paola:
+            future_break = max(future_break, 50 * 60)
+        
+        additional_break = max(0, future_break - deducted_pause)
+        final_end_time = estimated_end + timedelta(seconds=additional_break)
+        
+        if final_end_time.date() > day_date:
+            return "Unreachable"
             
-        return estimated_end.strftime("%H:%M")
+        return final_end_time.strftime("%H:%M")
 
     return TimeInfoResponse(
         current_time=current_time.strftime("%H:%M"),
@@ -694,12 +674,11 @@ async def get_time_info(paola: bool = False, user: User = Depends(get_user_to_vi
         time_remaining=seconds_to_time_str(time_remaining_seconds),
         manual_pause_seconds=manual_pause_seconds,
         work_interruption_seconds=work_interruption_seconds,
-        time_to_6h=predict_end_time(6 * 3600),
-        time_to_9h=predict_end_time(9 * 3600),
-        time_to_10h=predict_end_time(10 * 3600),
-        estimated_end_time=predict_end_time(user.target_work_seconds)
+        time_to_6h=predict(6 * 3600),
+        time_to_9h=predict(9 * 3600),
+        time_to_10h=predict(10 * 3600),
+        estimated_end_time=predict(user.target_work_seconds)
     )
-
 @api_router.get("/overtime", response_model=OvertimeResponse)
 async def get_overtime_summary(user: User = Depends(get_user_to_view), db: Session = Depends(get_db)):
     total_seconds = get_total_overtime_seconds(db, user)
@@ -751,14 +730,19 @@ async def get_statistics(from_date: str, to_date: str, user: User = Depends(get_
     today = get_berlin_now().date()
     date_iterator = from_date_dt.date()
     while date_iterator <= to_date_dt.date():
+        # Exclude the current day from statistics as it can be incomplete
+        if date_iterator == today:
+            date_iterator += timedelta(days=1)
+            continue
+
         day_bookings = sessions_by_day.get(date_iterator, [])
         
         if not day_bookings:
             date_iterator += timedelta(days=1)
             continue
 
-        is_ongoing = date_iterator == today and day_bookings and day_bookings[-1].action == 'in'
-        worked_seconds, _, _ = calculate_daily_stats(day_bookings, is_ongoing, user)
+        # For historical data, is_ongoing is always False
+        worked_seconds, _, _ = calculate_daily_stats(day_bookings, False, user)
         
         first_in = next((b for b in day_bookings if b.action == "in"), None)
         last_out = next((b for b in reversed(day_bookings) if b.action == "out"), None)
@@ -769,7 +753,7 @@ async def get_statistics(from_date: str, to_date: str, user: User = Depends(get_
             "target_hours": round(user.target_work_seconds / 3600, 2),
             "start_time": ensure_berlin_tz(first_in.timestamp).strftime("%H:%M") if first_in else None,
             "end_time": ensure_berlin_tz(last_out.timestamp).strftime("%H:%M") if last_out else None,
-            "is_ongoing": is_ongoing
+            "is_ongoing": False
         })
         date_iterator += timedelta(days=1)
 

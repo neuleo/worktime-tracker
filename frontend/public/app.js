@@ -40,7 +40,6 @@ async function router() {
         await loadUserSettings(signal);
     } else if (page === 'dashboard') {
         // Dashboard data is loaded by init and periodic refresh, live updates are handled by setupLiveUpdates
-        // Ensure live updates are running if we navigate here
         setupLiveUpdates();
     }
     
@@ -326,11 +325,14 @@ function setupLiveUpdates() {
 }
 
 function updateLiveDuration() {
-    if (appState.status.status === 'in' && appState.status.since) {
+    if (appState.status.status === 'in' && appState.status.duration_seconds) {
+        const initialDuration = appState.status.duration_seconds;
         const startTime = new Date(appState.status.since);
         const now = new Date();
-        const durationSeconds = Math.floor((now - startTime) / 1000);
-        
+        const elapsedSeconds = Math.floor((now - startTime) / 1000);
+
+        const durationSeconds = initialDuration + elapsedSeconds;
+
         const hours = Math.floor(durationSeconds / 3600);
         const minutes = Math.floor((durationSeconds % 3600) / 60);
         const seconds = durationSeconds % 60;
@@ -570,14 +572,25 @@ document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
         if (appState.isOnline) {
             console.log('📱 Page visible - refreshing data');
+            
+            // Abort any previous calls and get a new signal
+            routeAbortController.abort();
+            routeAbortController = new AbortController();
+            const signal = routeAbortController.signal;
+
             // Reload data for the current active user
             Promise.all([
-                loadStatus(),
-                loadTodayData(),
-                loadWeekData()
-            ]).then(() => router());
+                loadStatus(signal),
+                loadTodayData(signal),
+                loadWeekData(signal)
+            ]).then(() => {
+                // Re-initialize timers and render after data is loaded
+                setupLiveUpdates();
+                render();
+            });
         }
     } else {
+        // Clear timers when page is hidden to save resources
         if (timers.liveUpdate) clearInterval(timers.liveUpdate);
         if (timers.timeInfoLiveUpdate) clearInterval(timers.timeInfoLiveUpdate);
     }

@@ -233,6 +233,8 @@ async function deleteSession(sessionId) {
         if (!response.ok) throw new Error('Failed to delete session');
         showNotification('Buchung erfolgreich gelöscht', 'success');
         await Promise.all([loadSessions(routeAbortController.signal), loadTodayData(routeAbortController.signal), loadWeekData(routeAbortController.signal)]);
+        render();
+        render();
     } catch (error) {
         showNotification(`Fehler beim Löschen: ${error.message}`, 'error');
     }
@@ -257,6 +259,8 @@ async function createManualBooking(date, action, time) {
         document.getElementById('manual-time').value = '';
         
         await Promise.all([loadTodayData(routeAbortController.signal), loadWeekData(routeAbortController.signal), loadSessions(routeAbortController.signal)]);
+        render();
+        render();
     } catch (error) {
         showNotification(`Fehler: ${error.message}`, 'error');
     }
@@ -277,6 +281,8 @@ async function updateBooking(id, date, action, time) {
         showNotification('Buchung erfolgreich aktualisiert', 'success');
         await Promise.all([loadSessions(routeAbortController.signal), loadTodayData(routeAbortController.signal), loadWeekData(routeAbortController.signal)]);
         closeEditBookingModal();
+        render();
+        render();
     } catch (error) {
         showNotification(`Fehler: ${error.message}`, 'error');
     }
@@ -296,6 +302,8 @@ async function adjustBookingTime(id, seconds) {
         if (!response.ok) throw new Error((await response.json()).detail || 'Failed to adjust time');
         showNotification('Zeit erfolgreich angepasst', 'success');
         await Promise.all([loadSessions(routeAbortController.signal), loadTodayData(routeAbortController.signal), loadWeekData(routeAbortController.signal)]);
+        render();
+        render();
     } catch (error) {
         showNotification(`Fehler: ${error.message}`, 'error');
     }

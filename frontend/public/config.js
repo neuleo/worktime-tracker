@@ -2,7 +2,7 @@
 const CONFIG = {
     API_BASE: '/api',
     CACHE_BUSTER_ENABLED: true,
-    LIVE_UPDATE_INTERVAL: 5000, // 5 seconds
+    LIVE_UPDATE_INTERVAL: 1000, // 1 second
     CLOCK_UPDATE_INTERVAL: 1000, // 1 second
     NOTIFICATION_DURATION: 3000, // 3 seconds
     VIBRATION: {

@@ -817,9 +817,24 @@ function renderTimeInfoMilestones(timeInfo) {
 }
 
 function renderMilestone(label, time, color) {
-    const bgColor = time ? `bg-${color}-50` : 'bg-gray-50';
-    const textColor = time ? `text-${color}-700` : 'text-gray-500';
-    const displayTime = time || 'Bereits erreicht';
+    const isUnreachable = time === 'Unreachable';
+    const isReached = !time;
+
+    let displayTime, textColor, bgColor;
+
+    if (isUnreachable) {
+        displayTime = 'Nicht erreichbar';
+        textColor = 'text-gray-500';
+        bgColor = 'bg-gray-50';
+    } else if (isReached) {
+        displayTime = 'Bereits erreicht';
+        textColor = `text-green-700`;
+        bgColor = `bg-green-50`;
+    } else {
+        displayTime = time;
+        textColor = `text-${color}-700`;
+        bgColor = `bg-${color}-50`;
+    }
     
     return `
         <div class="flex justify-between items-center p-3 ${bgColor} rounded-lg">
