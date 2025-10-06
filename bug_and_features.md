@@ -5,6 +5,10 @@
 
 
 Bug:
-Seitdem der Arbeitszeit cutoff implementiert wurde, schein es ein problem mit der überstundenzeit rechnung auf der #timeinfo seite zu geben. Schau dir mal an, warum das so ist. In den Einstellungen gibt es ein Feld für Arbeitszeit cut off, es könnte damit was zutun haben
+Seitdem der Arbeitszeit cutoff implementiert wurde, schein es ein problem mit der überstundenzeit rechnung auf der #timeinfo seite zu geben. Schau dir mal an, warum das so ist. In den Einstellungen gibt es ein Feld für Arbeitszeit cut off, es könnte damit was zutun haben.
 
 Bug:
+Es scheint einen Bug zu geben, das man, obwohl die einstellungen schon vorhanden sind, manchmal in den user reingehen muss, und einmal da in den settings auf speichern klicken muss, damit die korrekt angewandt werden. Überprüfe das
+
+Bug:
+Schau, ob wirklich überall die vom user angegebenen parameter angewendet werden und ob das nicht irgendwo vergessen wurde

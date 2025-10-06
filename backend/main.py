@@ -2,7 +2,8 @@ from fastapi import FastAPI, HTTPException, Depends, Request, Response, APIRoute
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, desc, func, Boolean
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, desc, func, Boolean, event
+from sqlalchemy.engine import Engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 from datetime import datetime, timedelta, time
@@ -31,6 +32,12 @@ COOKIE_NAME = "worktime_auth"
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # --- DATABASE SETUP ---
+@event.listens_for(Engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.close()
+
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -47,6 +54,7 @@ class User(Base):
     short_break_logic_enabled = Column(Boolean, default=True, nullable=False)
     paola_pause_enabled = Column(Boolean, default=True, nullable=False)
     time_offset_seconds = Column(Integer, default=0, nullable=False)
+    token_version = Column(Integer, default=0, nullable=False)
 
     work_sessions = relationship("WorkSession", back_populates="user", cascade="all, delete-orphan")
     overtime_adjustments = relationship("OvertimeAdjustment", back_populates="user", cascade="all, delete-orphan")
@@ -187,14 +195,19 @@ def create_access_token(data, expires_delta=None):
 async def get_current_user(req: Request, db: Session = Depends(get_db)) -> User:
     token = req.cookies.get(COOKIE_NAME)
     exc = HTTPException(status_code=401, detail="Not authenticated")
-    if not token: raise exc
+    if not token:
+        raise exc
     try:
         payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[ALGORITHM])
-        username = payload.get("sub")
-        if not username: raise exc
-    except JWTError: raise exc
+        username: str = payload.get("sub")
+        token_version: int = payload.get("tv")
+        if username is None or token_version is None:
+            raise exc
+    except JWTError:
+        raise exc
     user = db.query(User).filter(User.name == username).first()
-    if not user: raise exc
+    if user is None or user.token_version != token_version:
+        raise exc
     return user
 
 async def get_user_to_view(user: Optional[str] = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> User:
@@ -321,7 +334,7 @@ def get_total_overtime_seconds(db: Session, user: User, end_date: Optional[datet
             total_session_overtime += overtime
 
     total_adjustment = adjustments_query.scalar() or 0
-    return total_session_overtime + total_adjustment
+    return total_session_overtime + total_adjustment + user.time_offset_seconds
 
 # --- API ROUTER (Protected) ---
 api_router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -330,36 +343,141 @@ api_router = APIRouter(dependencies=[Depends(get_current_user)])
 @api_router.post("/stamp", response_model=StampResponse)
 async def stamp(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     current_time = get_berlin_now()
-    today_bookings = get_day_bookings(db, current_user.id, current_time)
-    last_booking = max(today_bookings, key=lambda x: x.timestamp) if today_bookings else None
+    # Check the most recent booking for this user, regardless of date
+    last_booking = db.query(WorkSession).filter(WorkSession.user_id == current_user.id).order_by(desc(WorkSession.timestamp)).first()
     new_action = "out" if last_booking and last_booking.action == "in" else "in"
-    if not today_bookings and new_action == "out": raise HTTPException(status_code=400, detail="Erste Buchung muss 'Kommen' sein")
-    if last_booking and last_booking.action == new_action: raise HTTPException(status_code=400, detail=f"Letzte Aktion war bereits '{new_action}'")
-    db.add(WorkSession(user_id=current_user.id, timestamp=current_time, action=new_action)); db.commit()
+    
+    db.add(WorkSession(user_id=current_user.id, timestamp=current_time, action=new_action))
+    db.commit()
+    
     return StampResponse(status=new_action, timestamp=current_time.isoformat())
 
 @api_router.post("/sessions", status_code=201)
 async def create_manual_booking(data: ManualBookingCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    try: booking_time = datetime.combine(datetime.strptime(data.date, "%Y-%m-%d").date(), datetime.strptime(data.time, "%H:%M").time(), tzinfo=BERLIN_TZ)
-    except ValueError: raise HTTPException(status_code=400, detail="Ungültiges Format")
-    if data.action not in ["in", "out"]: raise HTTPException(status_code=400, detail="Aktion muss 'in'/'out' sein")
-    db.add(WorkSession(user_id=current_user.id, timestamp=booking_time, action=data.action)); db.commit()
+    try:
+        booking_date = datetime.strptime(data.date, "%Y-%m-%d").date()
+        booking_time_obj = datetime.strptime(data.time, "%H:%M").time()
+        booking_time = datetime.combine(booking_date, booking_time_obj, tzinfo=BERLIN_TZ)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Ungültiges Datums- oder Zeitformat. Bitte YYYY-MM-DD und HH:MM verwenden.")
+
+    if booking_time > get_berlin_now() + timedelta(days=1):
+        raise HTTPException(status_code=400, detail="Buchungen können nicht mehr als einen Tag in der Zukunft erstellt werden.")
+
+    if data.action not in ["in", "out"]:
+        raise HTTPException(status_code=400, detail="Aktion muss 'in' oder 'out' sein")
+
+    # --- Validation ---
+    day_bookings = get_day_bookings(db, current_user.id, booking_time)
+    
+    # Create a virtual list of all bookings for the day, including the new one
+    # We use a dictionary to easily represent the new booking without creating a full model instance
+    new_booking_virtual = {'timestamp': booking_time, 'action': data.action}
+    
+    # Convert SQLAlchemy models to dicts for uniform processing
+    day_bookings_dicts = [{'timestamp': ensure_berlin_tz(b.timestamp), 'action': b.action} for b in day_bookings]
+
+    all_day_bookings = sorted(day_bookings_dicts + [new_booking_virtual], key=lambda x: x['timestamp'])
+
+    # 1. Check if the first booking is "in"
+    if all_day_bookings[0]['action'] == "out":
+        raise HTTPException(status_code=400, detail="Die erste Buchung des Tages muss 'Kommen' (in) sein.")
+
+    # 2. Check for alternating sequence
+    for i in range(len(all_day_bookings) - 1):
+        if all_day_bookings[i]['action'] == all_day_bookings[i+1]['action']:
+            raise HTTPException(status_code=400, detail=f"Ungültige Sequenz: Zwei aufeinanderfolgende '{all_day_bookings[i]['action']}' Aktionen sind nicht erlaubt.")
+
+    db.add(WorkSession(user_id=current_user.id, timestamp=booking_time, action=data.action))
+    db.commit()
     return {"message": "Booking created"}
 
 @api_router.delete("/sessions/{session_id}", status_code=204)
 async def delete_session(session_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    booking = db.get(WorkSession, session_id)
-    if not booking or booking.user_id != current_user.id: raise HTTPException(status_code=404, detail="Not found")
-    db.delete(booking); db.commit()
+    booking_to_delete = db.get(WorkSession, session_id)
+    if not booking_to_delete or booking_to_delete.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    # --- Validation ---
+    day_bookings = get_day_bookings(db, current_user.id, booking_to_delete.timestamp)
+    
+    # Create a virtual list of what the day would look like after deletion
+    virtual_bookings = [{'timestamp': b.timestamp, 'action': b.action} for b in day_bookings if b.id != session_id]
+
+    if virtual_bookings:
+        sorted_b = sorted(virtual_bookings, key=lambda x: x['timestamp'])
+        # Check if the new first booking is 'out'
+        if sorted_b[0]['action'] == 'out':
+            raise HTTPException(status_code=400, detail="Löschen nicht möglich: Die erste Buchung des Tages wäre danach 'Gehen'.")
+        # Check for consecutive actions
+        for i in range(len(sorted_b) - 1):
+            if sorted_b[i]['action'] == sorted_b[i+1]['action']:
+                raise HTTPException(status_code=400, detail="Löschen nicht möglich: Es würden zwei gleiche, aufeinanderfolgende Aktionen entstehen.")
+
+    # If validation passes, delete the booking
+    db.delete(booking_to_delete)
+    db.commit()
 
 @api_router.put("/sessions/{session_id}")
 async def update_session(session_id: int, req: SessionUpdateRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    booking = db.get(WorkSession, session_id)
-    if not booking or booking.user_id != current_user.id: raise HTTPException(status_code=404, detail="Not found")
-    try: booking.timestamp = datetime.combine(datetime.strptime(req.date, "%Y-%m-%d").date(), datetime.strptime(req.time, "%H:%M").time(), tzinfo=BERLIN_TZ)
-    except ValueError: raise HTTPException(status_code=400, detail="Invalid format")
-    if req.action not in ["in", "out"]: raise HTTPException(status_code=400, detail="Action must be 'in' or 'out'")
-    booking.action = req.action; db.commit()
+    booking_to_update = db.get(WorkSession, session_id)
+    if not booking_to_update or booking_to_update.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    original_timestamp = booking_to_update.timestamp
+
+    try:
+        new_timestamp = datetime.combine(datetime.strptime(req.date, "%Y-%m-%d").date(), datetime.strptime(req.time, "%H:%M").time(), tzinfo=BERLIN_TZ)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date or time format. Please use YYYY-MM-DD and HH:MM.")
+
+    if new_timestamp > get_berlin_now() + timedelta(days=1):
+        raise HTTPException(status_code=400, detail="Buchungen können nicht mehr als einen Tag in der Zukunft liegen.")
+
+    if req.action not in ["in", "out"]:
+        raise HTTPException(status_code=400, detail="Action must be 'in' or 'out'")
+
+    # --- Validation ---
+    original_day_bookings = get_day_bookings(db, current_user.id, original_timestamp)
+    
+    if original_timestamp.date() == new_timestamp.date():
+        virtual_bookings = [{'timestamp': ensure_berlin_tz(b.timestamp), 'action': b.action} for b in original_day_bookings if b.id != session_id]
+        virtual_bookings.append({'timestamp': new_timestamp, 'action': req.action})
+        
+        if virtual_bookings:
+            sorted_b = sorted(virtual_bookings, key=lambda x: x['timestamp'])
+            if sorted_b[0]['action'] == 'out':
+                raise HTTPException(status_code=400, detail="Die erste Buchung des Tages muss 'Kommen' (in) sein.")
+            for i in range(len(sorted_b) - 1):
+                if sorted_b[i]['action'] == sorted_b[i+1]['action']:
+                    raise HTTPException(status_code=400, detail=f"Ungültige Sequenz: Zwei aufeinanderfolgende '{sorted_b[i]['action']}' Aktionen.")
+    else:
+        # Validate old day
+        old_day_virtual = [{'timestamp': ensure_berlin_tz(b.timestamp), 'action': b.action} for b in original_day_bookings if b.id != session_id]
+        if old_day_virtual:
+            sorted_old = sorted(old_day_virtual, key=lambda x: x['timestamp'])
+            if sorted_old[0]['action'] == 'out':
+                raise HTTPException(status_code=400, detail="Ungültige Sequenz am Ursprungstag.")
+            for i in range(len(sorted_old) - 1):
+                if sorted_old[i]['action'] == sorted_old[i+1]['action']:
+                    raise HTTPException(status_code=400, detail="Ungültige Sequenz am Ursprungstag.")
+
+        # Validate new day
+        new_day_bookings = get_day_bookings(db, current_user.id, new_timestamp)
+        new_day_virtual = [{'timestamp': ensure_berlin_tz(b.timestamp), 'action': b.action} for b in new_day_bookings]
+        new_day_virtual.append({'timestamp': new_timestamp, 'action': req.action})
+        sorted_new = sorted(new_day_virtual, key=lambda x: x['timestamp'])
+        if sorted_new[0]['action'] == 'out':
+            raise HTTPException(status_code=400, detail="Die erste Buchung am Zieldatum muss 'Kommen' (in) sein.")
+        for i in range(len(sorted_new) - 1):
+            if sorted_new[i]['action'] == sorted_new[i+1]['action']:
+                raise HTTPException(status_code=400, detail=f"Ungültige Sequenz am Zieldatum.")
+
+    # If validation passes, apply the changes
+    booking_to_update.timestamp = new_timestamp
+    booking_to_update.action = req.action
+    db.commit()
+    
     return {"message": "Booking updated"}
 
 @api_router.post("/sessions/{session_id}/adjust_time")
@@ -380,7 +498,8 @@ async def adjust_overtime(req: OvertimeAdjustmentRequest, current_user: User = D
         try:
             req_date = datetime.strptime(req.date, "%Y-%m-%d").date()
             adjustment_timestamp = datetime.combine(req_date, time(23, 59, 59), tzinfo=BERLIN_TZ)
-            calculation_end_date = datetime.combine(req_date, time.min, tzinfo=BERLIN_TZ)
+            # To include req_date in the calculation, end_date for the query must be the start of the next day.
+            calculation_end_date = datetime.combine(req_date + timedelta(days=1), time.min, tzinfo=BERLIN_TZ)
 
             # Delete existing adjustments for this day to prevent duplicates
             day_start = datetime.combine(req_date, time.min, tzinfo=BERLIN_TZ)
@@ -394,11 +513,12 @@ async def adjust_overtime(req: OvertimeAdjustmentRequest, current_user: User = D
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid date format")
 
-    # Calculate the total overtime balance that existed *before* the adjustment day
-    overtime_before_date = get_total_overtime_seconds(db, current_user, end_date=calculation_end_date)
+    # Calculate the total overtime balance up to the end of the adjustment day (before applying the new adjustment)
+    overtime_up_to_date = get_total_overtime_seconds(db, current_user, end_date=calculation_end_date)
     
     target_overtime_seconds = int(req.hours * 3600)
-    adjustment_seconds = target_overtime_seconds - overtime_before_date
+    # The adjustment amount is the difference between the desired total and the current total
+    adjustment_seconds = target_overtime_seconds - overtime_up_to_date
     
     db.add(OvertimeAdjustment(
         user_id=current_user.id, 
@@ -427,6 +547,7 @@ async def change_password(req: ChangePasswordRequest, current_user: User = Depen
     
     # Hash and update new password
     current_user.hashed_password = pwd_context.hash(req.new_password)
+    current_user.token_version = current_user.token_version + 1
     db.commit()
     
     return {"message": "Password updated successfully"}
@@ -463,7 +584,7 @@ async def get_week(year: int, week: int, user: User = Depends(get_user_to_view),
             is_ongoing = day.date() == get_berlin_now().date() and day_bookings[-1].action == 'in'
             worked, _, overtime = calculate_daily_stats(day_bookings, is_ongoing, user)
             total_worked += worked
-            if not is_ongoing: total_overtime += overtime
+            total_overtime += overtime
     return WeekResponse(week=f"{year}-W{week:02d}", worked_total=seconds_to_time_str(total_worked), target_total=seconds_to_time_str(work_days * user.target_work_seconds), overtime_total=seconds_to_time_str(total_overtime))
 
 @api_router.get("/status")
@@ -502,7 +623,8 @@ async def get_time_info(paola: bool = False, user: User = Depends(get_user_to_vi
             current_time=current_time.strftime("%H:%M"),
             time_worked_today=seconds_to_time_str(worked_seconds),
             time_remaining=seconds_to_time_str(max(0, user.target_work_seconds - worked_seconds)),
-            manual_pause_seconds=0 # Simplified
+            manual_pause_seconds=0, # Simplified
+            work_interruption_seconds=0 # Simplified
         )
 
     # --- Calculate current state ---    
@@ -536,11 +658,12 @@ async def get_time_info(paola: bool = False, user: User = Depends(get_user_to_vi
         remaining_net = target_net_seconds - current_net_seconds
         estimated_end = current_time + timedelta(seconds=remaining_net)
 
-        for _ in range(5): # 5 iterations are more than enough to converge
+        converged = False
+        for _ in range(15): # More iterations to ensure convergence
             future_effective_last_stamp = min(estimated_end, cutoff_end)
             if effective_first_stamp > future_effective_last_stamp: future_effective_last_stamp = effective_first_stamp
             
-            future_gross_seconds = (future_effective_last_stamp - effective_first_stamp).total_seconds()
+            future_gross_seconds = int((future_effective_last_stamp - effective_first_stamp).total_seconds())
             future_statutory_break = _calculate_statutory_break(future_gross_seconds)
             
             if paola:
@@ -551,9 +674,17 @@ async def get_time_info(paola: bool = False, user: User = Depends(get_user_to_vi
             future_net_seconds = future_gross_seconds - total_future_pause - work_interruption_seconds
             
             error_seconds = future_net_seconds - target_net_seconds
-            if abs(error_seconds) < 1: # Close enough
+            if abs(error_seconds) < 2: # Converged if error is less than 2 seconds
+                converged = True
                 break
             estimated_end -= timedelta(seconds=error_seconds)
+
+        if not converged:
+            return None # Prediction did not converge, result is unreliable
+
+        # If the loop results in a time on the next day, the target is unreachable today.
+        if estimated_end.date() > day_date:
+            return None
             
         return estimated_end.strftime("%H:%M")
 
@@ -620,17 +751,14 @@ async def get_statistics(from_date: str, to_date: str, user: User = Depends(get_
     today = get_berlin_now().date()
     date_iterator = from_date_dt.date()
     while date_iterator <= to_date_dt.date():
-        if date_iterator == today:
-            date_iterator += timedelta(days=1)
-            continue
-
         day_bookings = sessions_by_day.get(date_iterator, [])
         
         if not day_bookings:
             date_iterator += timedelta(days=1)
             continue
 
-        worked_seconds, _, _ = calculate_daily_stats(day_bookings, False, user)
+        is_ongoing = date_iterator == today and day_bookings and day_bookings[-1].action == 'in'
+        worked_seconds, _, _ = calculate_daily_stats(day_bookings, is_ongoing, user)
         
         first_in = next((b for b in day_bookings if b.action == "in"), None)
         last_out = next((b for b in reversed(day_bookings) if b.action == "out"), None)
@@ -641,6 +769,7 @@ async def get_statistics(from_date: str, to_date: str, user: User = Depends(get_
             "target_hours": round(user.target_work_seconds / 3600, 2),
             "start_time": ensure_berlin_tz(first_in.timestamp).strftime("%H:%M") if first_in else None,
             "end_time": ensure_berlin_tz(last_out.timestamp).strftime("%H:%M") if last_out else None,
+            "is_ongoing": is_ongoing
         })
         date_iterator += timedelta(days=1)
 
@@ -658,26 +787,8 @@ async def get_statistics(from_date: str, to_date: str, user: User = Depends(get_
     ]
 
     # 4. Calculate Overtime Trend
-    # Get total overtime before the start date
-    initial_overtime_sessions = db.query(WorkSession).filter(
-        WorkSession.user_id == user.id,
-        WorkSession.timestamp < from_date_dt
-    ).all()
-    sessions_by_day_initial = defaultdict(list)
-    for s in initial_overtime_sessions:
-        sessions_by_day_initial[ensure_berlin_tz(s.timestamp).date()].append(s)
-    
-    initial_overtime = 0
-    for day, day_sessions in sessions_by_day_initial.items():
-        _, _, overtime = calculate_daily_stats(day_sessions, False, user)
-        initial_overtime += overtime
-
-    initial_adjustments = db.query(func.sum(OvertimeAdjustment.adjustment_seconds)).filter(
-        OvertimeAdjustment.user_id == user.id,
-        OvertimeAdjustment.timestamp < from_date_dt
-    ).scalar() or 0
-    
-    cumulative_overtime = initial_overtime + initial_adjustments
+    # Use the central function to get the initial overtime balance, which includes adjustments and the user's time offset
+    cumulative_overtime = get_total_overtime_seconds(db, user, end_date=from_date_dt)
     
     overtime_trend = []
     # Use daily_summary which is already sorted by date
@@ -716,8 +827,8 @@ def on_startup():
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
         if not db.query(User).first():
-            db.add(User(name="leon", hashed_password=pwd_context.hash(APP_PASSWORD)))
-            db.add(User(name="paola", hashed_password=pwd_context.hash(APP_PASSWORD), target_work_seconds=28800, work_start_time_str="08:00", work_end_time_str="18:00"))
+            db.add(User(name="leon", hashed_password=pwd_context.hash(APP_PASSWORD), token_version=0))
+            db.add(User(name="paola", hashed_password=pwd_context.hash(APP_PASSWORD), target_work_seconds=28800, work_start_time_str="08:00", work_end_time_str="18:00", token_version=0))
             db.commit()
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -747,7 +858,8 @@ async def list_users(db: Session = Depends(get_db)):
 async def login(res: Response, data: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.name == data.username).first()
     if not user or not verify_password(data.password, user.hashed_password): raise HTTPException(401, "Incorrect username or password")
-    token = create_access_token({"sub": user.name}, timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS))
+    token_data = {"sub": user.name, "tv": user.token_version}
+    token = create_access_token(token_data, timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS))
     res.set_cookie(key=COOKIE_NAME, value=token, httponly=True, max_age=int(timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS).total_seconds()), samesite='lax')
     return {"user": user.name}
 

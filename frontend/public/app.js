@@ -217,10 +217,13 @@ function handlePlannedDepartureChange(event) {
     const plannedTimestampIso = `${todayDate}T${plannedTime}:00`;
     tempBookings.push({ action: 'out', time: plannedTime, timestamp_iso: plannedTimestampIso });
 
-    const stats = calculateDailyStatsJS(tempBookings, appState.settings.target_work_seconds, { 
+    const options = {
         paola: appState.paolaButtonActive,
-        short_break_logic: appState.settings.short_break_logic_enabled
-    });
+        short_break_logic: appState.settings.short_break_logic_enabled,
+        work_start_time_str: appState.settings.work_start_time_str,
+        work_end_time_str: appState.settings.work_end_time_str
+    };
+    const stats = calculateDailyStatsJS(tempBookings, appState.settings.target_work_seconds, options);
     const overtimeColor = getOvertimeColor(stats.overtime);
     resultEl.innerHTML = `
         <div class="text-center mt-4 p-4 bg-gray-50 rounded-lg">

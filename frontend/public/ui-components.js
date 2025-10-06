@@ -608,7 +608,11 @@ function renderBookingsByDate(date) {
     });
 
     // Calculate daily overtime for this date
-    const dayOvertimeData = calculateDailyStatsJS(dayBookings, appState.settings.target_work_seconds);
+    const dayOvertimeData = calculateDailyStatsJS(dayBookings, appState.settings.target_work_seconds, {
+        short_break_logic: appState.settings.short_break_logic_enabled,
+        work_start_time_str: appState.settings.work_start_time_str,
+        work_end_time_str: appState.settings.work_end_time_str
+    });
     
     return `
         <div class="border-b last:border-b-0">

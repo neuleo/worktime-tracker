@@ -63,6 +63,12 @@ function secondsToTimeStr(seconds) {
     return isNegative ? `-${timeStr}` : timeStr;
 }
 
+const timeStrToSecondsHelper = (timeStr) => {
+    if (!timeStr || typeof timeStr !== 'string' || !timeStr.includes(':')) return 0;
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    return (hours * 3600) + (minutes * 60);
+};
+
 function calculateDailyStatsJS(bookings, targetSeconds, options = {}) {
     if (!bookings || bookings.length === 0) {
         return { worked: '00:00', pause: '00:00', overtime: '00:00', netSeconds: 0, pauseSeconds: 0, overtimeSeconds: 0 };
@@ -85,8 +91,13 @@ function calculateDailyStatsJS(bookings, targetSeconds, options = {}) {
         return (hours * 3600) + (minutes * 60);
     };
 
-    const cutoff_start_seconds = (6 * 3600) + (30 * 60); // 6:30
-    const cutoff_end_seconds = (18 * 3600) + (30 * 60); // 18:30
+    const cutoff_start_seconds = options.work_start_time_str
+        ? timeStrToSecondsHelper(options.work_start_time_str)
+        : (6 * 3600) + (30 * 60); // 6:30 fallback
+
+    const cutoff_end_seconds = options.work_end_time_str
+        ? timeStrToSecondsHelper(options.work_end_time_str)
+        : (18 * 3600) + (30 * 60); // 18:30 fallback
 
     const firstStampSeconds = getSecondsOfDay(sortedBookings[0]);
     const lastStampSeconds = getSecondsOfDay(sortedBookings[sortedBookings.length - 1]);

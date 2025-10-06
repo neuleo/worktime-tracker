@@ -58,6 +58,11 @@ def run_migration():
                 connection.execute(text('ALTER TABLE users ADD COLUMN time_offset_seconds INTEGER'))
                 connection.execute(text('UPDATE users SET time_offset_seconds = 0'))
 
+            if 'token_version' not in columns:
+                print("Adding column: token_version")
+                connection.execute(text('ALTER TABLE users ADD COLUMN token_version INTEGER'))
+                connection.execute(text('UPDATE users SET token_version = 0'))
+
             # Use a session to update data
             with SessionLocal() as db:
                 # 2. Update existing 'leon' user
@@ -88,6 +93,12 @@ def run_migration():
                     print("User 'paola' created.")
                 
                 db.commit()
+
+                # 4. Ensure token_version is not NULL for any user
+                print("Ensuring token_version is set for all users...")
+                db.execute(text("UPDATE users SET token_version = 0 WHERE token_version IS NULL"))
+                db.commit()
+                print("Done.")
 
             print("Migration completed successfully.")
 

@@ -11,7 +11,20 @@ async function apiCall(url, options = {}) {
         ...options.headers
     };
 
-    return fetch(fullUrl, { ...options, headers });
+    const response = await fetch(fullUrl, { ...options, headers });
+
+    if (response.status === 401) {
+        // If we get a 401, the token is invalid or expired.
+        // We should clear the session and redirect to the login page.
+        console.error('Authentication error (401). Redirecting to login.');
+        localStorage.removeItem('loggedInUser');
+        localStorage.removeItem('activeUser');
+        window.location.href = '/login.html';
+        // Throw an error to prevent the calling function from processing a bad response.
+        throw new Error('Unauthorized');
+    }
+
+    return response;
 }
 
 // --- User and Settings --- 
