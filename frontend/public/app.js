@@ -1,9 +1,16 @@
 // App Logic and Event Handlers
 
+let routeAbortController = new AbortController();
+
 // --- ROUTER ---
 const routes = ['dashboard', 'sessions', 'timeinfo', 'manual', 'flextime', 'stats', 'settings'];
 
 async function router() {
+    // Abort any ongoing API calls from the previous route
+    routeAbortController.abort();
+    routeAbortController = new AbortController();
+    const signal = routeAbortController.signal;
+
     const page = window.location.hash.substring(1) || 'dashboard';
     
     if (!routes.includes(page)) {
@@ -16,26 +23,21 @@ async function router() {
     if (timers.liveUpdate) clearInterval(timers.liveUpdate);
     if (timers.timeInfoLiveUpdate) clearInterval(timers.timeInfoLiveUpdate);
 
-    // Clear page-specific state
-    if (appState.currentPage === 'timeinfo') {
-        appState.plannedDepartureTime = '';
-    }
-
     appState.currentPage = page;
     closeMenu();
     
     // Load data for specific pages and set up live updates
     if (page === 'sessions') {
-        await Promise.all([loadSessions(), loadUserSettings()]);
+        await Promise.all([loadSessions(signal), loadUserSettings(signal)]);
     } else if (page === 'timeinfo') {
-        await Promise.all([loadTimeInfo(), loadUserSettings()]); // Load settings as well
+        await Promise.all([loadTimeInfo(signal), loadUserSettings(signal)]); // Load settings as well
         setupTimeInfoLiveUpdates(); // Start periodic updates
     } else if (page === 'flextime') {
-        await loadOvertimeData();
+        await loadOvertimeData(signal);
     } else if (page === 'stats') {
-        // Data is loaded by renderCharts in statistics.js
+        // Data is loaded by renderCharts in statistics.js, which needs the signal
     } else if (page === 'settings') {
-        await loadUserSettings();
+        await loadUserSettings(signal);
     } else if (page === 'dashboard') {
         // Dashboard data is loaded by init and periodic refresh, live updates are handled by setupLiveUpdates
         // Ensure live updates are running if we navigate here
@@ -54,12 +56,17 @@ async function switchActiveUser(username) {
     appState.activeUser = username;
     localStorage.setItem('activeUser', username);
 
+    // Abort previous calls and get a new signal for the new user's data
+    routeAbortController.abort();
+    routeAbortController = new AbortController();
+    const signal = routeAbortController.signal;
+
     // Reload all data for the new user
     await Promise.all([
-        loadStatus(),
-        loadTodayData(),
-        loadWeekData(),
-        loadUserSettings()
+        loadStatus(signal),
+        loadTodayData(signal),
+        loadWeekData(signal),
+        loadUserSettings(signal)
     ]);
 
     // Re-route to the current page to force a full re-render with new data
@@ -76,8 +83,10 @@ function openMenu() {
 
 function closeMenu() {
     const overlay = document.getElementById('menu-overlay');
-    overlay.classList.add('opacity-0', 'pointer-events-none');
-    overlay.classList.remove('opacity-100', 'menu-open');
+    if (overlay) {
+        overlay.classList.add('opacity-0', 'pointer-events-none');
+        overlay.classList.remove('opacity-100', 'menu-open');
+    }
 }
 
 // --- UI HANDLERS ---
@@ -432,6 +441,7 @@ function render() {
 
     // Render dynamic parts after main render
     if (currentPage === 'stats') {
+        setupStatisticsEventListeners();
         setTimeout(renderCharts, 0); // Use setTimeout to ensure DOM is updated
     }
     
@@ -491,6 +501,14 @@ function setupEventListeners() {
             handleStamp();
         }
     });
+
+    window.addEventListener('unhandledrejection', (event) => {
+        console.error('Unhandled rejection:', event.reason);
+        // Avoid showing a notification for AbortError, which is expected
+        if (event.reason && event.reason.name !== 'AbortError') {
+            showNotification('Ein unerwarteter Fehler ist aufgetreten', 'error');
+        }
+    });
 }
 
 // --- INITIALIZE APP ---
@@ -516,14 +534,16 @@ async function init() {
         localStorage.setItem('activeUser', appState.activeUser);
     }
     
+    const signal = routeAbortController.signal;
+    
     // Load initial data
-    await loadUsers(); // Load all users for the switcher
+    await loadUsers(signal); // Load all users for the switcher
     
     Promise.all([
-        loadStatus(),
-        loadTodayData(),
-        loadWeekData(),
-        loadUserSettings()
+        loadStatus(signal),
+        loadTodayData(signal),
+        loadWeekData(signal),
+        loadUserSettings(signal)
     ]).then(() => {
         console.log('✅ Initial data loaded');
         router(); // Initial route handling

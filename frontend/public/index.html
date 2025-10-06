@@ -38,16 +38,22 @@
 </head>
 <body>
     <script>
-        // Force cache bust on all scripts
+        // Force cache bust on all scripts and stylesheets
         document.addEventListener('DOMContentLoaded', () => {
-            const scripts = document.querySelectorAll('script[src]');
-            scripts.forEach(script => {
-                if (script.src.includes('?v=')) {
-                    script.src = script.src.replace(/\?v=\d+/, `?v=${Date.now()}`);
-                } else {
-                    script.src = `${script.src}?v=${Date.now()}`;
-                }
-            });
+            const bustCache = (selector, attribute) => {
+                document.querySelectorAll(selector).forEach(el => {
+                    let url = el[attribute];
+                    if (url) {
+                        const separator = url.includes('?') ? '&' : '?';
+                        // Remove old buster and add new one
+                        url = url.replace(/[?&]v=\d+/, '');
+                        el[attribute] = `${url}${separator}v=${Date.now()}`;
+                    }
+                });
+            };
+            
+            bustCache('script[src]', 'src');
+            bustCache('link[rel="stylesheet"][href]', 'href');
         });
     </script>
     <div id="root">

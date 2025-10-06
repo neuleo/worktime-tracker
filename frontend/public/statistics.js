@@ -85,13 +85,18 @@ function setDateRange(range) {
 }
 
 function destroyCharts() {
-    activeCharts.forEach(chart => chart.destroy());
+    activeCharts.forEach(chart => {
+        try {
+            chart.destroy();
+        } catch (e) {
+            console.error("Error destroying chart:", e);
+        }
+    });
     activeCharts = [];
 }
 
 async function renderCharts() {
     destroyCharts();
-    setupStatisticsEventListeners();
 
     const fromDate = document.getElementById('from-date').value;
     const toDate = document.getElementById('to-date').value;
@@ -109,7 +114,7 @@ async function renderCharts() {
         </div>
     `;
 
-    await loadStatistics(fromDate, toDate);
+    await loadStatistics(fromDate, toDate, routeAbortController.signal);
 
     if (!appState.statisticsData) {
         chartsContainer.innerHTML = `<p class="text-red-500">Fehler beim Laden der Diagrammdaten.</p>`;
@@ -153,8 +158,12 @@ function renderStartEndChart(data) {
     const validEntries = data.filter(d => d.start_time && d.end_time);
 
     const chartData = validEntries.map(d => {
-        const start = parseFloat(d.start_time.replace(':', '.'));
-        const end = parseFloat(d.end_time.replace(':', '.'));
+        const [startH, startM] = d.start_time.split(':').map(Number);
+        const start = startH + (startM / 60);
+        
+        const [endH, endM] = d.end_time.split(':').map(Number);
+        const end = endH + (endM / 60);
+
         return [start, end];
     });
 

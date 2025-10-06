@@ -21,6 +21,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (response.ok) {
                 const data = await response.json();
+                if (!data || !data.user) {
+                    throw new Error('Invalid response from server');
+                }
                 // Store the logged-in user and the active user, then redirect
                 localStorage.setItem('loggedInUser', data.user);
                 localStorage.setItem('activeUser', data.user);

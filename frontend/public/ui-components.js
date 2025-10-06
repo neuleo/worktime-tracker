@@ -586,6 +586,14 @@ function closeEditBookingModal() {
     }
 }
 
+function closeEditBookingModal() {
+    const modal = document.getElementById('edit-booking-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+    }
+}
+
 function renderEmptySessionsState() {
     return `
         <div class="p-6 text-center text-gray-500">

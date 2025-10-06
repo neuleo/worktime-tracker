@@ -23,8 +23,9 @@ function formatTimeShort(date) {
 }
 
 function formatDuration(timeString) {
-    if (timeString.startsWith('-')) {
-        return `−${timeString.substring(1)}`;
+    if (!timeString) return '00:00';
+    if (timeString.startsWith('-') || timeString.startsWith('−')) {
+        return `-${timeString.substring(1)}`;
     }
     return timeString;
 }
