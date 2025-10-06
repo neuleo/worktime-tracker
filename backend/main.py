@@ -648,17 +648,21 @@ async def get_time_info(paola: bool = False, user: User = Depends(get_user_to_vi
     current_net_seconds -= work_interruption_seconds
     time_remaining_seconds = max(0, user.target_work_seconds - current_net_seconds)
 
-    def predict(target_seconds):
+    def predict(target_seconds, forced_break_seconds: Optional[int] = None):
         if current_net_seconds >= target_seconds:
             return None
         
         remaining_seconds = target_seconds - current_net_seconds
         estimated_end = current_time + timedelta(seconds=remaining_seconds)
         
-        future_gross = (min(estimated_end, cutoff_end) - effective_first_stamp).total_seconds()
-        future_break = _calculate_statutory_break(future_gross)
-        if paola:
-            future_break = max(future_break, 50 * 60)
+        # Use forced break if provided, otherwise calculate dynamically
+        if forced_break_seconds is not None:
+            future_break = forced_break_seconds
+        else:
+            future_gross = (min(estimated_end, cutoff_end) - effective_first_stamp).total_seconds()
+            future_break = _calculate_statutory_break(future_gross)
+            if paola:
+                future_break = max(future_break, 50 * 60)
         
         additional_break = max(0, future_break - deducted_pause)
         final_end_time = estimated_end + timedelta(seconds=additional_break)
@@ -674,9 +678,9 @@ async def get_time_info(paola: bool = False, user: User = Depends(get_user_to_vi
         time_remaining=seconds_to_time_str(time_remaining_seconds),
         manual_pause_seconds=manual_pause_seconds,
         work_interruption_seconds=work_interruption_seconds,
-        time_to_6h=predict(6 * 3600),
-        time_to_9h=predict(9 * 3600),
-        time_to_10h=predict(10 * 3600),
+        time_to_6h=predict(6 * 3600, forced_break_seconds=0),
+        time_to_9h=predict(9 * 3600, forced_break_seconds=1800),
+        time_to_10h=predict(10 * 3600, forced_break_seconds=2700),
         estimated_end_time=predict(user.target_work_seconds)
     )
 @api_router.get("/overtime", response_model=OvertimeResponse)
