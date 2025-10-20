@@ -116,10 +116,22 @@ async function loadTimeInfo(signal) {
     try {
         const paolaParam = appState.paolaButtonActive ? '&paola=true' : '';
         const response = await apiCall(`/timeinfo?user=${appState.activeUser}${paolaParam}`, { signal });
+        if (!response.ok) {
+            // Don't process bad responses
+            throw new Error(`Failed to load time info with status: ${response.status}`);
+        }
         const data = await response.json();
         appState.timeInfo = data;
+
+        // If a manual pause (> 15 min) has been taken, the Paola option is no longer relevant for the day.
+        // Deactivate it to ensure correct calculations for subsequent updates.
+        if (data && data.manual_pause_seconds > 0 && appState.paolaButtonActive) {
+            appState.paolaButtonActive = false;
+        }
     } catch (error) {
-        console.error('Failed to load time info:', error);
+        if (error.name !== 'AbortError') {
+            console.error('Failed to load time info:', error);
+        }
     }
 }
 

@@ -89,10 +89,10 @@ function closeMenu() {
 }
 
 // --- UI HANDLERS ---
-function togglePaolaButton() {
+async function togglePaolaButton() {
     appState.paolaButtonActive = !appState.paolaButtonActive;
-    render(); // Re-render the UI immediately with the new paola state
-    loadTimeInfo(); // Fetch updated data from the backend
+    await loadTimeInfo(routeAbortController.signal); // Fetch updated data from the backend
+    render(); // Re-render the UI with the new paola state and the new time info
 }
 
 function setActiveTab(tab) {
@@ -345,7 +345,14 @@ function updateLiveDuration() {
 function setupTimeInfoLiveUpdates() {
     if (timers.timeInfoLiveUpdate) clearInterval(timers.timeInfoLiveUpdate);
     if (appState.currentPage === 'timeinfo') {
-        timers.timeInfoLiveUpdate = setInterval(loadTimeInfo, CONFIG.LIVE_UPDATE_INTERVAL);
+        timers.timeInfoLiveUpdate = setInterval(async () => {
+            // Pass the route-specific abort signal to the load function
+            await loadTimeInfo(routeAbortController.signal);
+            // Re-render the component to reflect the updated data
+            if (appState.currentPage === 'timeinfo') {
+                render();
+            }
+        }, CONFIG.LIVE_UPDATE_INTERVAL);
     }
 }
 

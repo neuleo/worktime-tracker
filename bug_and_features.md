@@ -2,6 +2,3 @@
 #Arbeite die liste immer ein nach dem anderen ab, nicht mehrere Bugs gleichzeitig und das von oben nach unten
 #Sobald du ein fehler oder features gefixt/hinzugefügt hast, gib mir einmal commit message, damit man es committen kann. Tue dies erst, nachdem der Anwender bestätigt hat, das es erfolgreich implementiert wurde. Sag mir vorher wie du das realisieren würdest
 
-
-Bug:
-Der Paola Pause Button funktioniert nicht richtig
