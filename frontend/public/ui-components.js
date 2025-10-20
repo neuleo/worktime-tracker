@@ -730,7 +730,7 @@ function renderTimeInfo() {
 }
 
 function renderWhatIfResult(plannedTime) {
-    if (!plannedTime || !appState.dayData || !appState.dayData.bookings || appState.dayData.bookings.length === 0) {
+    if (!plannedTime || !appState.dayData || !appState.dayData.bookings || appState.dayData.bookings.length === 0 || !appState.settings) {
         return '';
     }
 
@@ -742,7 +742,13 @@ function renderWhatIfResult(plannedTime) {
     const plannedTimestampIso = `${todayDate}T${plannedTime}:00`;
     tempBookings.push({ action: 'out', time: plannedTime, timestamp_iso: plannedTimestampIso });
 
-    const stats = calculateDailyStatsJS(tempBookings, { paola: appState.paolaButtonActive });
+    const options = {
+        paola: appState.paolaButtonActive,
+        short_break_logic: appState.settings.short_break_logic_enabled,
+        work_start_time_str: appState.settings.work_start_time_str,
+        work_end_time_str: appState.settings.work_end_time_str
+    };
+    const stats = calculateDailyStatsJS(tempBookings, appState.settings.target_work_seconds, options);
     const overtimeColor = getOvertimeColor(stats.overtime);
 
     return `

@@ -325,13 +325,10 @@ function setupLiveUpdates() {
 }
 
 function updateLiveDuration() {
-    if (appState.status.status === 'in' && appState.status.duration_seconds) {
-        const initialDuration = appState.status.duration_seconds;
+    if (appState.status.status === 'in' && appState.status.since) {
         const startTime = new Date(appState.status.since);
         const now = new Date();
-        const elapsedSeconds = Math.floor((now - startTime) / 1000);
-
-        const durationSeconds = initialDuration + elapsedSeconds;
+        const durationSeconds = Math.floor((now - startTime) / 1000);
 
         const hours = Math.floor(durationSeconds / 3600);
         const minutes = Math.floor((durationSeconds % 3600) / 60);

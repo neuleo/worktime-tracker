@@ -3,9 +3,5 @@
 #Sobald du ein fehler oder features gefixt/hinzugefügt hast, gib mir einmal commit message, damit man es committen kann. Tue dies erst, nachdem der Anwender bestätigt hat, das es erfolgreich implementiert wurde. Sag mir vorher wie du das realisieren würdest
 
 
-
 Bug:
-Bei Arbeitszeit info stehen bei den Uhrzeiten mittlerweile immer: 
-6h Arbeitszeit:Bereits erreicht
-9h Arbeitszeit:Bereits erreicht
-10h Arbeitszeit:Bereits erreicht
+Der Paola Pause Button funktioniert nicht richtig
