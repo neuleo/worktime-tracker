@@ -718,50 +718,79 @@ async def get_statistics(from_date: str, to_date: str, user: User = Depends(get_
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
 
-    # 1. Get all relevant sessions and group by day
+    # 1. Get all relevant data for the period
     all_sessions = db.query(WorkSession).filter(
         WorkSession.user_id == user.id,
         WorkSession.timestamp >= from_date_dt,
         WorkSession.timestamp < (to_date_dt + timedelta(days=1))
     ).order_by(WorkSession.timestamp).all()
+    
+    adjustments_in_period = db.query(OvertimeAdjustment).filter(
+        OvertimeAdjustment.user_id == user.id,
+        OvertimeAdjustment.timestamp >= from_date_dt,
+        OvertimeAdjustment.timestamp < (to_date_dt + timedelta(days=1))
+    ).all()
 
+    # 2. Group data by day
     sessions_by_day = defaultdict(list)
     for session in all_sessions:
         sessions_by_day[ensure_berlin_tz(session.timestamp).date()].append(session)
+        
+    adjustments_by_day = defaultdict(int)
+    for adj in adjustments_in_period:
+        adjustments_by_day[ensure_berlin_tz(adj.timestamp).date()] += adj.adjustment_seconds
 
-    # 2. Calculate Daily Summary
+    # 3. Process each day in the range
     daily_summary = []
+    overtime_trend = []
+    
+    cumulative_overtime = get_total_overtime_seconds(db, user, end_date=from_date_dt)
+    
     today = get_berlin_now().date()
     date_iterator = from_date_dt.date()
+
     while date_iterator <= to_date_dt.date():
         # Exclude the current day from statistics as it can be incomplete
         if date_iterator == today:
             date_iterator += timedelta(days=1)
             continue
 
-        day_bookings = sessions_by_day.get(date_iterator, [])
+        day_bookings = sessions_by_day.get(date_iterator)
         
-        if not day_bookings:
-            date_iterator += timedelta(days=1)
-            continue
+        # Calculate session overtime
+        session_overtime_seconds = 0
+        worked_seconds = 0
+        if day_bookings:
+            worked_seconds, _, session_overtime_seconds = calculate_daily_stats(day_bookings, False, user)
+            
+            first_in = next((b for b in day_bookings if b.action == "in"), None)
+            last_out = next((b for b in reversed(day_bookings) if b.action == "out"), None)
 
-        # For historical data, is_ongoing is always False
-        worked_seconds, _, _ = calculate_daily_stats(day_bookings, False, user)
+            daily_summary.append({
+                "date": date_iterator.isoformat(),
+                "worked_hours": round(worked_seconds / 3600, 2),
+                "target_hours": round(user.target_work_seconds / 3600, 2),
+                "start_time": ensure_berlin_tz(first_in.timestamp).strftime("%H:%M") if first_in else None,
+                "end_time": ensure_berlin_tz(last_out.timestamp).strftime("%H:%M") if last_out else None,
+                "is_ongoing": False
+            })
+
+        # Get adjustments for the day
+        adjustment_seconds = adjustments_by_day.get(date_iterator, 0)
         
-        first_in = next((b for b in day_bookings if b.action == "in"), None)
-        last_out = next((b for b in reversed(day_bookings) if b.action == "out"), None)
-
-        daily_summary.append({
-            "date": date_iterator.isoformat(),
-            "worked_hours": round(worked_seconds / 3600, 2),
-            "target_hours": round(user.target_work_seconds / 3600, 2),
-            "start_time": ensure_berlin_tz(first_in.timestamp).strftime("%H:%M") if first_in else None,
-            "end_time": ensure_berlin_tz(last_out.timestamp).strftime("%H:%M") if last_out else None,
-            "is_ongoing": False
-        })
+        # Update cumulative overtime
+        cumulative_overtime += session_overtime_seconds + adjustment_seconds
+        
+        # Add to trend data, but only if there was activity on this day (sessions or adjustment)
+        if day_bookings or adjustment_seconds != 0:
+            overtime_trend.append({
+                "date": date_iterator.isoformat(),
+                "overtime_hours": round(cumulative_overtime / 3600, 2)
+            })
+        
         date_iterator += timedelta(days=1)
 
-    # 3. Calculate Weekly Summary from Daily Summary
+    # 4. Calculate Weekly Summary from Daily Summary
     weekly_summary_dict = defaultdict(lambda: {"worked_hours": 0, "target_hours": 0})
     for daily in daily_summary:
         day_date = datetime.fromisoformat(daily["date"])
@@ -773,22 +802,6 @@ async def get_statistics(from_date: str, to_date: str, user: User = Depends(get_
     weekly_summary = [
         {"week": week, **data} for week, data in weekly_summary_dict.items()
     ]
-
-    # 4. Calculate Overtime Trend
-    # Use the central function to get the initial overtime balance, which includes adjustments and the user's time offset
-    cumulative_overtime = get_total_overtime_seconds(db, user, end_date=from_date_dt)
-    
-    overtime_trend = []
-    # Use daily_summary which is already sorted by date
-    for daily in daily_summary:
-        worked_hours = daily["worked_hours"]
-        target_hours = daily["target_hours"]
-        daily_overtime_seconds = (worked_hours - target_hours) * 3600
-        cumulative_overtime += daily_overtime_seconds
-        overtime_trend.append({
-            "date": daily["date"],
-            "overtime_hours": round(cumulative_overtime / 3600, 2)
-        })
 
     return StatisticsResponse(
         overtime_trend=overtime_trend,
