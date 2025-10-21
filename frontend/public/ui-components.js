@@ -277,6 +277,22 @@ function renderSettingsPage() {
                     `}
                 </form>
             </div>
+
+            <!-- Appearance Settings -->
+            <div class="bg-white rounded-xl shadow-sm border">
+                <div class="p-6 border-b">
+                    <h2 class="text-lg font-bold text-gray-900">Darstellung</h2>
+                </div>
+                <div class="p-6">
+                    <label for="dark-mode-toggle" class="flex items-center justify-between cursor-pointer">
+                        <span class="font-medium text-gray-700 pr-4">Dark Mode</span>
+                        <div class="relative">
+                            <input type="checkbox" id="dark-mode-toggle" class="sr-only peer" onchange="handleDarkModeToggle(this.checked)">
+                            <div class="w-11 h-6 bg-gray-200 rounded-full peer peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                        </div>
+                    </label>
+                </div>
+            </div>
         </div>
     `;
 }
@@ -843,7 +859,7 @@ function renderMilestone(label, time, color) {
     }
     
     return `
-        <div class="flex justify-between items-center p-3 ${bgColor} rounded-lg">
+        <div class="flex justify-between items-center p-3 ${bgColor} rounded-lg milestone-item">
             <span class="text-gray-700">${label}:</span>
             <span class="font-mono font-bold ${textColor}">${displayTime}</span>
         </div>

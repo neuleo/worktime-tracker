@@ -88,6 +88,16 @@ function closeMenu() {
     }
 }
 
+function handleDarkModeToggle(isEnabled) {
+    if (isEnabled) {
+        document.documentElement.classList.add('dark');
+        localStorage.setItem('darkMode', 'true');
+    } else {
+        document.documentElement.classList.remove('dark');
+        localStorage.setItem('darkMode', 'false');
+    }
+}
+
 // --- UI HANDLERS ---
 async function togglePaolaButton() {
     appState.paolaButtonActive = !appState.paolaButtonActive;
@@ -449,6 +459,12 @@ function render() {
     if (currentPage === 'stats') {
         setupStatisticsEventListeners();
         setTimeout(renderCharts, 0); // Use setTimeout to ensure DOM is updated
+    }
+    if (currentPage === 'settings') {
+        const darkModeToggle = document.getElementById('dark-mode-toggle');
+        if (darkModeToggle) {
+            darkModeToggle.checked = localStorage.getItem('darkMode') === 'true';
+        }
     }
     
     // The user switcher is rendered in two places, so we need to populate both.
