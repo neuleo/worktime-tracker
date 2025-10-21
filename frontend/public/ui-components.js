@@ -517,7 +517,7 @@ function renderSessions() {
                     <p class="text-sm text-gray-600 mt-1">Übersicht aller Buchungen für ${appState.activeUser}</p>
                 </div>
                 
-                <div class="max-h-96 overflow-y-auto scrollbar-hide">
+                <div class="max-h-96 lg:max-h-[calc(100vh-15rem)] overflow-y-auto scrollbar-hide">
                     ${sortedDates.length === 0 ? renderEmptySessionsState() : sortedDates.map(renderBookingsByDate).join('')}
                 </div>
             </div>
