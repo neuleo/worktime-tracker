@@ -329,9 +329,10 @@ def get_total_overtime_seconds(db: Session, user: User, end_date: Optional[datet
         # Otherwise, check if the day is the current, ongoing day.
         is_ongoing_day = not end_date and day == now_date and (day_sessions and max(day_sessions, key=lambda x: x.timestamp).action == "in")
         
-        if not is_ongoing_day:
-            _, _, overtime = calculate_daily_stats(day_sessions, False, user)
-            total_session_overtime += overtime
+        # Always calculate daily stats. For ongoing days, it will be a live calculation.
+        # For past days, it's final. This makes the total overtime a live, accurate value.
+        _, _, overtime = calculate_daily_stats(day_sessions, is_ongoing_day, user)
+        total_session_overtime += overtime
 
     total_adjustment = adjustments_query.scalar() or 0
     return total_session_overtime + total_adjustment + user.time_offset_seconds
@@ -666,6 +667,16 @@ async def get_time_info(paola: bool = False, user: User = Depends(get_user_to_vi
         
         additional_break = max(0, future_break - deducted_pause)
         final_end_time = estimated_end + timedelta(seconds=additional_break)
+
+        # Second pass for better accuracy, especially when crossing break thresholds
+        if additional_break > 0:
+            future_gross_2 = (min(final_end_time, cutoff_end) - effective_first_stamp).total_seconds()
+            future_break_2 = _calculate_statutory_break(future_gross_2)
+            if paola:
+                future_break_2 = max(future_break_2, 50 * 60)
+            additional_break_2 = max(0, future_break_2 - deducted_pause)
+            final_end_time = estimated_end + timedelta(seconds=additional_break_2)
+
         
         if final_end_time.date() > day_date:
             return "Unreachable"
