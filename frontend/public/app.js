@@ -203,6 +203,7 @@ function handleSettingsSubmit(event) {
     const shortBreakLogic = document.getElementById('setting-short-break-logic').checked;
     const paolaPause = document.getElementById('setting-paola-pause').checked;
     const timeOffset = parseInt(document.getElementById('setting-time-offset').value, 10) || 0;
+    const debugLoggingEl = document.getElementById('setting-debug-logging');
 
     const [h, m] = targetHours.split(':').map(Number);
     const targetSeconds = h * 3600 + m * 60;
@@ -213,7 +214,8 @@ function handleSettingsSubmit(event) {
         work_end_time_str: endTime,
         short_break_logic_enabled: shortBreakLogic,
         paola_pause_enabled: paolaPause,
-        time_offset_seconds: timeOffset
+        time_offset_seconds: timeOffset,
+        debug_logging_enabled: debugLoggingEl ? debugLoggingEl.checked : appState.settings.debug_logging_enabled
     };
 
     saveUserSettings(newSettings);

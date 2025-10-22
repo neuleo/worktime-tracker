@@ -63,6 +63,11 @@ def run_migration():
                 connection.execute(text('ALTER TABLE users ADD COLUMN token_version INTEGER'))
                 connection.execute(text('UPDATE users SET token_version = 0'))
 
+            if 'debug_logging_enabled' not in columns:
+                print("Adding column: debug_logging_enabled")
+                connection.execute(text('ALTER TABLE users ADD COLUMN debug_logging_enabled BOOLEAN'))
+                connection.execute(text('UPDATE users SET debug_logging_enabled = FALSE'))
+
             # Use a session to update data
             with SessionLocal() as db:
                 # 2. Update existing 'leon' user

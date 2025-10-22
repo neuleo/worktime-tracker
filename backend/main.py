@@ -55,6 +55,7 @@ class User(Base):
     paola_pause_enabled = Column(Boolean, default=True, nullable=False)
     time_offset_seconds = Column(Integer, default=0, nullable=False)
     token_version = Column(Integer, default=0, nullable=False)
+    debug_logging_enabled = Column(Boolean, default=False, nullable=False)
 
     work_sessions = relationship("WorkSession", back_populates="user", cascade="all, delete-orphan")
     overtime_adjustments = relationship("OvertimeAdjustment", back_populates="user", cascade="all, delete-orphan")
@@ -171,6 +172,7 @@ class UserSettings(BaseModel):
     short_break_logic_enabled: bool
     paola_pause_enabled: bool
     time_offset_seconds: int
+    debug_logging_enabled: bool
 
 # --- HELPER & UTILITY FUNCTIONS ---
 def get_berlin_now(): return datetime.now(BERLIN_TZ)
@@ -256,6 +258,10 @@ def _calculate_pauses_and_interruptions(
     work_interruption_seconds = 0
 
     use_short_break_logic = user.short_break_logic_enabled
+    
+    if user.debug_logging_enabled:
+        print(f"  --- DEBUG: _calculate_pauses_and_interruptions (user: {user.name}) ---")
+        print(f"  use_short_break_logic: {use_short_break_logic}")
 
     for i in range(len(sorted_bookings) - 1):
         if sorted_bookings[i].action == 'out' and sorted_bookings[i+1].action == 'in':
@@ -265,14 +271,36 @@ def _calculate_pauses_and_interruptions(
             effective_pause_end = min(pause_end, effective_last_stamp)
             if effective_pause_end > effective_pause_start:
                 pause_duration_seconds = int((effective_pause_end - effective_pause_start).total_seconds())
+                
+                if user.debug_logging_enabled:
+                    print(f"    - Pause detected: {pause_start.strftime('%H:%M:%S')} to {pause_end.strftime('%H:%M:%S')} (raw duration: {int((pause_end - pause_start).total_seconds())}s)")
+                    print(f"      Effective pause: {effective_pause_start.strftime('%H:%M:%S')} to {effective_pause_end.strftime('%H:%M:%S')} (effective duration: {pause_duration_seconds}s)")
+
                 if use_short_break_logic and pause_duration_seconds < 900:
                     work_interruption_seconds += pause_duration_seconds
+                    if user.debug_logging_enabled:
+                        print(f"      -> Classified as WORK INTERRUPTION ({pause_duration_seconds}s)")
                 else:
                     manual_pause_seconds += pause_duration_seconds
+                    if user.debug_logging_enabled:
+                        print(f"      -> Classified as MANUAL PAUSE ({pause_duration_seconds}s)")
+    
+    if user.debug_logging_enabled:
+        print(f"  --- END DEBUG: _calculate_pauses_and_interruptions ---")
+
     return manual_pause_seconds, work_interruption_seconds
 
 def calculate_daily_stats(bookings: List[WorkSession], is_ongoing_day: bool, user: User) -> tuple[int, int, int]:
     if not bookings: return 0, 0, 0
+
+    if user.debug_logging_enabled:
+        print(f"\n--- DEBUG: calculate_daily_stats for user '{user.name}' on {ensure_berlin_tz(bookings[0].timestamp).date()} ---")
+        print(f"is_ongoing_day: {is_ongoing_day}")
+        print(f"user settings: target={user.target_work_seconds}s, start={user.work_start_time_str}, end={user.work_end_time_str}, short_break_logic={user.short_break_logic_enabled}")
+        print(f"Bookings ({len(bookings)}):")
+        for b in sorted(bookings, key=lambda x: x.timestamp):
+            print(f"  - id={b.id}, action='{b.action}', time={ensure_berlin_tz(b.timestamp).strftime('%Y-%m-%d %H:%M:%S')}")
+
     sorted_bookings = sorted(bookings, key=lambda x: x.timestamp)
     day_date = ensure_berlin_tz(sorted_bookings[0].timestamp).date()
     try:
@@ -287,11 +315,27 @@ def calculate_daily_stats(bookings: List[WorkSession], is_ongoing_day: bool, use
     
     gross_session_seconds = int((effective_last_stamp - effective_first_stamp).total_seconds())
 
+    if user.debug_logging_enabled:
+        print(f"first_stamp: {first_stamp.strftime('%H:%M:%S')}, last_stamp: {last_stamp.strftime('%H:%M:%S')}")
+        print(f"cutoff_start: {cutoff_start.strftime('%H:%M:%S')}, cutoff_end: {cutoff_end.strftime('%H:%M:%S')}")
+        print(f"effective_first_stamp: {effective_first_stamp.strftime('%H:%M:%S')}, effective_last_stamp: {effective_last_stamp.strftime('%H:%M:%S')}")
+        print(f"gross_session_seconds: {gross_session_seconds} ({seconds_to_time_str(gross_session_seconds)})")
+
     manual_pause_seconds, work_interruption_seconds = _calculate_pauses_and_interruptions(
         sorted_bookings, effective_first_stamp, effective_last_stamp, user
     )
 
+    if user.debug_logging_enabled:
+        print(f"manual_pause_seconds: {manual_pause_seconds} ({seconds_to_time_str(manual_pause_seconds)})")
+        print(f"work_interruption_seconds: {work_interruption_seconds} ({seconds_to_time_str(work_interruption_seconds)})")
+
     net_worked_seconds, total_deducted_pause = _calculate_net_work_time_and_pause(gross_session_seconds, manual_pause_seconds)
+
+    if user.debug_logging_enabled:
+        statutory_break = _calculate_statutory_break(gross_session_seconds)
+        print(f"statutory_break_seconds: {statutory_break} ({seconds_to_time_str(statutory_break)})")
+        print(f"total_deducted_pause (max(manual, statutory)): {total_deducted_pause} ({seconds_to_time_str(total_deducted_pause)})")
+        print(f"net_worked_seconds (gross - deducted_pause): {net_worked_seconds} ({seconds_to_time_str(net_worked_seconds)})")
 
     # Interruptions are always deducted from work time, on top of pauses.
     net_worked_seconds -= work_interruption_seconds
@@ -301,6 +345,14 @@ def calculate_daily_stats(bookings: List[WorkSession], is_ongoing_day: bool, use
 
     capped_net_worked_seconds = min(net_worked_seconds, 10 * 3600)
     overtime_seconds = capped_net_worked_seconds - user.target_work_seconds
+
+    if user.debug_logging_enabled:
+        print(f"net_worked_seconds (after interruptions): {net_worked_seconds} ({seconds_to_time_str(net_worked_seconds)})")
+        print(f"total_pause_seconds (displayed): {total_pause_seconds} ({seconds_to_time_str(total_pause_seconds)})")
+        print(f"capped_net_worked_seconds (max 10h): {capped_net_worked_seconds} ({seconds_to_time_str(capped_net_worked_seconds)})")
+        print(f"overtime_seconds (capped_net - target): {overtime_seconds} ({seconds_to_time_str(overtime_seconds)})")
+        print(f"--- END DEBUG: calculate_daily_stats ---")
+
     return capped_net_worked_seconds, total_pause_seconds, overtime_seconds
 
 def get_day_bookings(db: Session, user_id: int, date: datetime) -> List[WorkSession]:
@@ -510,6 +562,7 @@ async def adjust_overtime(req: OvertimeAdjustmentRequest, current_user: User = D
                 OvertimeAdjustment.timestamp >= day_start,
                 OvertimeAdjustment.timestamp <= day_end
             ).delete(synchronize_session=False)
+            db.flush()  # Ensure the deletion is flushed before recalculating the balance
 
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid date format")
@@ -537,6 +590,7 @@ async def update_user_settings(settings: UserSettings, current_user: User = Depe
     current_user.short_break_logic_enabled = settings.short_break_logic_enabled
     current_user.paola_pause_enabled = settings.paola_pause_enabled
     current_user.time_offset_seconds = settings.time_offset_seconds
+    current_user.debug_logging_enabled = settings.debug_logging_enabled
     db.commit(); db.refresh(current_user)
     return settings
 
@@ -829,6 +883,8 @@ async def get_user_settings(user: User = Depends(get_user_to_view)):
         user_data['paola_pause_enabled'] = True
     if user_data.get('time_offset_seconds') is None:
         user_data['time_offset_seconds'] = 0
+    if user_data.get('debug_logging_enabled') is None:
+        user_data['debug_logging_enabled'] = False
     return UserSettings.model_validate(user_data)
 
 # --- MAIN APP SETUP ---
