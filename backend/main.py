@@ -310,13 +310,18 @@ def get_day_bookings(db: Session, user_id: int, date: datetime) -> List[WorkSess
 
 def get_total_overtime_seconds(db: Session, user: User, end_date: Optional[datetime] = None) -> int:
     sessions_query = db.query(WorkSession).filter(WorkSession.user_id == user.id)
-    adjustments_query = db.query(func.sum(OvertimeAdjustment.adjustment_seconds)).filter(OvertimeAdjustment.user_id == user.id)
+    adjustments_query = db.query(OvertimeAdjustment).filter(OvertimeAdjustment.user_id == user.id)
 
     if end_date:
         sessions_query = sessions_query.filter(WorkSession.timestamp < end_date)
         adjustments_query = adjustments_query.filter(OvertimeAdjustment.timestamp < end_date)
 
     all_sessions = sessions_query.all()
+    all_adjustments = adjustments_query.all()
+
+    # Get a set of dates that have adjustments
+    adjustment_dates = {ensure_berlin_tz(adj.timestamp).date() for adj in all_adjustments}
+
     sessions_by_day = defaultdict(list)
     for session in all_sessions:
         sessions_by_day[ensure_berlin_tz(session.timestamp).date()].append(session)
@@ -325,6 +330,10 @@ def get_total_overtime_seconds(db: Session, user: User, end_date: Optional[datet
     now_date = get_berlin_now().date()
 
     for day, day_sessions in sessions_by_day.items():
+        # If a day has an adjustment, its session overtime is ignored, as the adjustment overrides it.
+        if day in adjustment_dates:
+            continue
+
         # If an end_date is provided, we are calculating a historical balance, so all days are considered "finished".
         # Otherwise, check if the day is the current, ongoing day.
         is_ongoing_day = not end_date and day == now_date and (day_sessions and max(day_sessions, key=lambda x: x.timestamp).action == "in")
@@ -333,7 +342,7 @@ def get_total_overtime_seconds(db: Session, user: User, end_date: Optional[datet
             _, _, overtime = calculate_daily_stats(day_sessions, False, user)
             total_session_overtime += overtime
 
-    total_adjustment = adjustments_query.scalar() or 0
+    total_adjustment = sum(adj.adjustment_seconds for adj in all_adjustments)
     return total_session_overtime + total_adjustment + user.time_offset_seconds
 
 # --- API ROUTER (Protected) ---
@@ -489,42 +498,40 @@ async def adjust_session_time(session_id: int, req: SessionTimeAdjustRequest, cu
 
 @api_router.post("/overtime")
 async def adjust_overtime(req: OvertimeAdjustmentRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    # Timestamp for the new adjustment entry
-    adjustment_timestamp = get_berlin_now()
-    # The point in time to calculate the existing balance up to
-    calculation_end_date = get_berlin_now()
+    if not req.date:
+        raise HTTPException(status_code=400, detail="Date is required for overtime adjustment.")
 
-    if req.date:
-        try:
-            req_date = datetime.strptime(req.date, "%Y-%m-%d").date()
-            adjustment_timestamp = datetime.combine(req_date, time(23, 59, 59), tzinfo=BERLIN_TZ)
-            # To include req_date in the calculation, end_date for the query must be the start of the next day.
-            calculation_end_date = datetime.combine(req_date + timedelta(days=1), time.min, tzinfo=BERLIN_TZ)
+    try:
+        req_date = datetime.strptime(req.date, "%Y-%m-%d").date()
+        adjustment_timestamp = datetime.combine(req_date, time(23, 59, 59), tzinfo=BERLIN_TZ)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format")
 
-            # Delete existing adjustments for this day to prevent duplicates
-            day_start = datetime.combine(req_date, time.min, tzinfo=BERLIN_TZ)
-            day_end = datetime.combine(req_date, time.max, tzinfo=BERLIN_TZ)
-            db.query(OvertimeAdjustment).filter(
-                OvertimeAdjustment.user_id == current_user.id,
-                OvertimeAdjustment.timestamp >= day_start,
-                OvertimeAdjustment.timestamp <= day_end
-            ).delete(synchronize_session=False)
+    # Delete any existing adjustment for the same day to avoid conflicts.
+    day_start = datetime.combine(req_date, time.min, tzinfo=BERLIN_TZ)
+    day_end = datetime.combine(req_date, time.max, tzinfo=BERLIN_TZ)
+    db.query(OvertimeAdjustment).filter(
+        OvertimeAdjustment.user_id == current_user.id,
+        OvertimeAdjustment.timestamp >= day_start,
+        OvertimeAdjustment.timestamp <= day_end
+    ).delete(synchronize_session=False)
 
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid date format")
+    # Calculate total overtime at the END of the PREVIOUS day.
+    calculation_end_date = datetime.combine(req_date, time.min, tzinfo=BERLIN_TZ)
+    overtime_before_req_date = get_total_overtime_seconds(db, current_user, end_date=calculation_end_date)
 
-    # Calculate the total overtime balance up to the end of the adjustment day (before applying the new adjustment)
-    overtime_up_to_date = get_total_overtime_seconds(db, current_user, end_date=calculation_end_date)
-    
     target_overtime_seconds = int(req.hours * 3600)
-    # The adjustment amount is the difference between the desired total and the current total
-    adjustment_seconds = target_overtime_seconds - overtime_up_to_date
+    
+    # The new adjustment's value is the difference between the desired total for the day (target_overtime_seconds)
+    # and the total overtime accumulated from all previous days.
+    # This makes the adjustment effectively set the day's total overtime contribution.
+    adjustment_seconds = target_overtime_seconds - overtime_before_req_date
     
     db.add(OvertimeAdjustment(
         user_id=current_user.id, 
         adjustment_seconds=adjustment_seconds,
         timestamp=adjustment_timestamp 
-    )); 
+    ))
     db.commit()
     return {"message": "Overtime adjusted"}
 
